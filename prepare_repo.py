@@ -18,6 +18,8 @@ for directory in ['firmware/CarReady','tests','project-libraries']:
         if path.is_file() and '.git' not in path.parts and '__pycache__' not in path.parts:
             if path.name not in ['wifi_credentials.h','Dashboard.h']:
                 selected.add(path.relative_to(root))
+for path in (root/'docs'/'images').rglob('*'):
+    if path.is_file():selected.add(path.relative_to(root))
 
 # Credentials are compared in memory only; never print their values.
 secrets=[]
