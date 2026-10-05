@@ -22,7 +22,7 @@ try:
     for _ in range(10):
         report['before'].append(status())
         time.sleep(.16)
-    close=[s['front_cm'] for s in report['before'] if s['front_cm'] is not None and s['front_cm']<25]
+    close=[s['front_cm'] for s in report['before'] if s['front_cm'] is not None and s['front_cm']<35]
     assert close, 'No close, reliable echoes: do not start the check.'
     request('/api/control?op=arm&guard=1',True)
     for _ in range(5):

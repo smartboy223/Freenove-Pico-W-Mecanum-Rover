@@ -2,7 +2,34 @@
 
 Checked on **5–6 October 2026**, with a Pico W and Freenove FNK0089 mecanum car. Live wheel checks require the car to be securely lifted.
 
-## CarReady 2.4
+## CarReady 2.5 — current firmware
+
+Built and installed on 6 October 2026. The complete firmware build and dashboard JavaScript syntax check passed: **443,096 bytes** of program storage and **75,520 bytes** of global RAM on Arduino-Pico 6.2.0.
+
+`./test.ps1` passed **53 compile-time policy assertions** and **12 scenarios using the production `Pilot.h` controller**. Alongside the earlier eight recovery scenarios, the new cases cover isolated echo dropouts, isolated short spikes, a newly blocked route after forward travel, and disabled backtracking. The policy checks cover two-reading obstacle confirmation, supported-cluster filtering, stopping/restart margins, warning cooldowns and retreat history/age/attempt limits.
+
+The current movement policy brakes roaming at 45 cm, resumes with 55 cm clearance, and caps cruising at 20% below 70 cm or 25% farther away. Manual/line/light forward guarding stops below 35 cm. A suspicious first short echo pauses movement immediately; two consistent short readings confirm an obstacle warning. Persistent missing readings delay their warning; separate warning cooldowns prevent repeated alternating alerts. Resolved range alerts clear when verified forward movement resumes.
+
+### Other current live checks
+
+Firmware 2.5 passed **27 LAN control checks**, **seven stopped-car studio checks**, **seven HTTP compatibility checks**, and the USB stopped-state/invalid-command checks. The controls include all ten manual wheel patterns, command expiry during an unfinished HTTP request, retreat setting bounds, the independent roaming deadline, and all eight show patterns. The show check accepts the normal deadline race only when a fresh status confirms `Show finished` and all wheels are stopped.
+
+A real flat object, confirmed by the owner as less than 10 cm away, produced reliable readings of **6.9–8.9 cm**. All **five guarded forward requests were blocked**, with every wheel output zero. This confirms a responsive near target and the stop gate, not full sensor calibration or floor stopping distance.
+
+All four dashboard panels fit **320- and 390-pixel phone widths** without horizontal overflow. The saved dashboard image shows the actual 2.5 firmware and new retreat option. Scan-sector cards now use recent radar measurements instead of retaining old navigation scan values; the centered card follows the current front reading. No current physical-floor dead-end or stopping-distance test was performed.
+
+### Live lifted-wheel recovery
+
+Both diagnostic scripts passed on the actual Pico and motor hardware, using deliberate filtered-sensor fault injection followed by real sonar readings:
+
+- **Missing-echo recovery:** two turns in the same direction, six moving turn samples, no forward travel during suppression. Actual ranging restored, then 37 forward samples, first at **9.515 seconds**. The independent 15-second deadline stopped/disarmed and cleared suppression.
+- **Blocked-route recovery:** six initial real forward samples produced travel history. A simulated 12 cm wall triggered a short retreat (two sampled reverse outputs, capped at 18%), then a fresh scan. Restored actual sonar produced 72 forward samples, first at **7.359 seconds**. All resumed-forward samples had resolved range alerts cleared. The independent 18-second deadline stopped/disarmed and cleared the diagnostic.
+
+A retreat requires recent forward history on the same heading, no older than eight seconds. Each reverse step is capped at 350 ms, with at most two attempts. Turning clears the travel history, so it cannot justify reversing on a different heading. Both scripts now check for at least 55 cm reliable front clearance before starting.
+
+These tests prove the controller transitions and motor outputs while lifted. They do not prove physical floor escape, exact turn angles, rear clearance or collision-free navigation. A genuinely close corner with no usable recent path correctly remains stopped.
+
+## Earlier CarReady 2.4 checks
 
 The production roaming controller lives in `firmware/CarReady/Pilot.h`. PC tests include that same controller with hardware/time boundaries substituted, rather than reproducing its logic in a separate implementation.
 
@@ -39,7 +66,7 @@ Firmware 2.4 passed all 26 live control cases, seven stopped-car studio cases, s
 ## Practical limits
 
 - Forward travel requires fresh, stable ultrasonic evidence. A failed or poorly reflecting sensor can still prevent forward movement after the bounded recovery attempts.
-- Known readings below 18 cm block turning. Blind rotation with missing echoes cannot guarantee side/rear clearance; use an open area and supervision.
+- Known scan-sector readings below 18 cm or centered readings below 28 cm block turning. Recent-path retreats are limited and do not measure the rear. Blind rotation with missing echoes cannot guarantee side/rear clearance; use an open area and supervision.
 - Timed pivots have no encoder feedback or measured chassis heading. The radar displays approximate recent echo sectors, not a map or object outline.
 - Line/flashlight sensors responded in prior hardware tests; reliable tracking on a floor still depends on calibration and placement.
 - Battery percentage is a voltage estimate between 6.7 V and 8.4 V, not measured capacity or predicted runtime.

@@ -22,7 +22,7 @@ def command(query):
 def status():
     code,body=request('/api/status');assert code==200
     s=json.loads(body);assert not s['armed'] and not s['moving'] and s['wheels']==[0]*4
-    assert s['firmware']=='CarReady-2.4'
+    assert s['firmware']=='CarReady-2.5'
     return s
 def record(name,**values):
     results.append({'check':name,'passed':True,**values});print('PASS:',name,flush=True)

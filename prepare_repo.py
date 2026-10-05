@@ -10,7 +10,7 @@ files=['README.md','REMOTE-GUIDE.md','THIRD-PARTY.md','.gitignore','requirements
        'wifi-config.example.json','build.ps1','test.ps1','flash.ps1','Flash-Car.bat',
        'Check-Car.bat','Check-Ultrasonic.bat','prepare_wifi.py','prepare_dashboard.py',
        'prepare_repo.py','car_tool.py','control_check.py','studio_check.py','lan_check.py',
-       'http_recovery_check.py','recovery_check.py','hardware_check.py','sensor_check.py',
+       'http_recovery_check.py','blocked_recovery_check.py','recovery_check.py','hardware_check.py','sensor_check.py',
        'sensor_session.py','light_follow_check.py','obstacle_check.py','docs/VALIDATION.md']
 selected={Path(name) for name in files}
 for directory in ['firmware/CarReady','tests','project-libraries']:

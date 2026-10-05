@@ -1,10 +1,10 @@
 # 🤖 Freenove Pico W Mecanum Rover
 
-CarReady **2.4** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, RGB effects and sound alerts. The dashboard runs on the Pico W itself; the PC is needed for setup and flashing only.
+CarReady **2.5** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, RGB effects and sound alerts. The dashboard runs on the Pico W itself; the PC is needed for setup and flashing only.
 
 **📱 Control from your phone · 🛞 Move in any direction · 📡 Scan obstacles · 🌈 Lights & sound**
 
-![Live Pico W dashboard showing obstacle roaming and radar](docs/images/dashboard-roam.png)
+![Live Pico W dashboard showing obstacle roaming and radar](docs/images/dashboard-2.5.jpg)
 
 *Real dashboard screenshot from the tested car. The IP address and sensor readings shown are examples; yours will differ.*
 
@@ -19,7 +19,7 @@ New to Pico projects? Follow the [Windows setup below](#easy-setup), then try [y
 ## ✨ Features
 
 - Mecanum manual driving: forward, reverse, crab walks, diagonals and rotation.
-- Timed obstacle roaming with a servo-mounted ultrasonic sensor, five-angle scans and heading recovery when echoes are missing.
+- Timed obstacle roaming with a servo-mounted ultrasonic sensor, five-angle scans, retained-direction turns and short recent-path retreats.
 - Live radar with distance labels, approximate echo sectors and selectable 100/150/300 cm range.
 - Black-line and flashlight following, with configurable sensor polarity and light baseline.
 - Battery voltage, approximate charge level, sensor readings and individual wheel activity.
@@ -191,23 +191,28 @@ The Pico serves the dashboard directly on port 80. DHCP may change its address; 
 
 In **Drive**, select a low speed, keep **Front obstacle guard** enabled and arm manual controls. Hold a direction to move; release to stop. Crab arrows move sideways, corners move diagonally and curved arrows rotate. **STOP & DISARM** cancels every mode. The configured forward/backward correction preserves left/right crab and rotation; verify wheel direction while lifted after changing hardware.
 
-The front guard stops forward movement below 25 cm, with uncertain echoes, or with the head off-center. Sideways, reverse and rotation are not covered by the front sensor.
+The front guard stops forward movement below **35 cm**, with uncertain echoes, or with the head off-center. One suspicious short echo brakes immediately; two consistent close echoes confirm an obstacle warning. Sideways, reverse and rotation are not covered by the front sensor.
 
 ### 📡 Obstacle roaming
 
 In **Roam**, select 5–600 seconds and press **Start timed obstacle roaming**.
 
-1. Check the centered sensor; advance when reliable front clearance is at least 35 cm.
-2. Keep watching the front while moving. Stop to scan 30°, 60°, 90°, 120° and 150° at an obstacle, uncertain echo or periodic route check.
-3. Prefer an open forward route or turn toward a measured clear side.
-4. If no usable route echo exists and **Turn out of dead ends & missing echoes** is enabled, turn in short steps to inspect other headings. Keep the same direction rather than oscillating. Stop and check fresh front readings after each step; repeat the wide scan after four unsuccessful inspection turns.
-5. Resume forward travel only after a reliable clear front reading. Stop/disarm after eight unsuccessful turns or at the selected timer deadline.
+1. Check the centered sensor; start or resume travel with at least **55 cm** of reliable front clearance.
+2. While cruising, brake below **45 cm** and slow to 20% below 70 cm. Brief missing or isolated short echoes cause a quiet pause; a continuing problem starts a route scan.
+3. Scan 30°, 60°, 90°, 120° and 150°. Prefer the clear front or a measured side exit. Point the sensor toward the chosen turn before pivoting.
+4. When boxed in, **Short retreat along the recent path** permits up to two small reverse steps, each no longer than 350 ms at 18%. This requires recent forward travel on the same heading; no travel history means no reverse. Each retreat is followed by a fresh wide scan.
+5. With **Turn out of dead ends & missing echoes** enabled, inspect new headings in short turns. Retain the escape direction instead of oscillating, verify each new front, and repeat the wide scan after four unsuccessful inspection turns.
+6. Resume only with fresh clear front readings. Stop/disarm after eight unsuccessful turns or at the selected timer deadline.
 
-Inspection turns last 450 ms at up to 25%; measured-exit turns last 500 ms and measured dead-end pivots 350 ms. A known echo below 18 cm blocks a turn, and a newly detected close echo interrupts one already in progress. Missing echoes can mean open space, an unsuitable surface or a failed sensor; they never authorize forward travel. Turn angles are timed estimates, so the car may inspect the opposite side but cannot guarantee a precise 180° turn. The rear/corners remain unsensed. Use an open, level area away from edges and stairs.
+Inspection turns last 450–600 ms; measured-exit turns last 500 ms and dead-end pivots increase from 350 to 800 ms as attempts accumulate. Turning is capped at 25%. A known scan sector below 18 cm or front clearance below 28 cm blocks a pivot; a newly confirmed close echo interrupts an ongoing turn. An isolated short echo pauses the turn for verification.
+
+⚠️ The car has **one front ultrasonic sensor**, with no rear sensor, encoders or map. A recent path can become blocked after the car passes it; disable short retreats if that could happen. Missing echoes never authorize forward travel. Timed turns cannot guarantee an exact angle, and the rear/corners remain unsensed. Use a clear, level area away from edges and stairs; these controls cannot guarantee collision-free navigation.
+
+🔔 Obstacle warnings need two consistent short echoes. Missing-echo warnings wait for a persistent gap; repeated warning types have their own cooldown. Resolved range alerts clear when verified forward travel resumes.
 
 **Continue until the timer ends** runs the selected timer on the Pico without keeping the page open. Wi-Fi loss, low battery, Stop and watchdog expiry still stop the car. A hardware timer enforces the overall deadline independently of HTTP requests.
 
-Radar points represent recent sensor measurements, not a room map or object shape. They fade after six seconds and clear after a chassis turn.
+Radar points represent recent sensor measurements, not a room map or object shape. They and the left/center/right cards fade after six seconds and clear after a chassis turn. When the head is centered, the center card follows the current front reading.
 
 ### 🔦 Line and flashlight following
 
@@ -237,10 +242,11 @@ To swap the front module: switch the car off, unplug USB, fit the ultrasonic sen
 | `python lan_check.py` | HTTP compatibility checks |
 | `python http_recovery_check.py` | Stopped-car HTTP stress and intentional watchdog restart |
 | `python recovery_check.py --lifted` | Live fault-injection test: two turns with echoes suppressed, then restore the real sensor |
+| `python blocked_recovery_check.py --lifted` | Real forward travel, simulated wall, bounded retreat, then real ranging and resumed travel |
 
-Live tests write local JSON evidence, excluded from the repository. Scripts other than `control_check.py` and `recovery_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. See [validation notes](docs/VALIDATION.md) for current results and limits.
+Live tests write local JSON evidence, excluded from the repository. Scripts other than `control_check.py`, `recovery_check.py` and `blocked_recovery_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. See [validation notes](docs/VALIDATION.md) for current results and limits.
 
-The USB recovery diagnostic requires the exact command `TESTNOECHO LIFTED`. It intentionally suppresses filtered echoes until two turns complete, then restores real sonar readings; an independent 15-second deadline ends the test. Stop, reset and watchdog recovery clear the diagnostic. It is a lifted-wheel test, not a floor-navigation certification.
+Clear the front by at least 80 cm before either lifted recovery test; their preflight check requires a reliable reading of at least 55 cm. The USB recovery diagnostic requires the exact command `TESTNOECHO LIFTED`. It intentionally suppresses filtered echoes until two turns complete, then restores real sonar readings; an independent 15-second deadline ends the test. Stop, reset and watchdog recovery clear the diagnostic. The separate `TESTBLOCKED LIFTED` diagnostic starts with real forward travel, simulates a 12 cm wall to exercise the retreat, restores real sonar, and stops at an independent 18-second deadline. Both diagnostics clear on Stop/reset. These are lifted-wheel tests, not floor-navigation certification.
 
 ## 📂 Project layout
 
@@ -253,6 +259,7 @@ prepare_wifi.py         Read local Wi-Fi settings without logging credentials
 prepare_dashboard.py    Embed the dashboard HTML in firmware
 car_tool.py             USB setup/status/Stop commands
 recovery_check.py        Lifted-car heading-recovery test
+blocked_recovery_check.py Lifted-car recent-path retreat test
 prepare_repo.py         Prepare a clean repository copy without local secrets/artifacts
 REMOTE-GUIDE.md          Short physical-remote guide
 wifi-config.example.json Example settings only
@@ -278,6 +285,8 @@ Keep the original licenses with vendored code; see [third-party notices](THIRD-P
 | Phone cannot open the dashboard | Use the IP reported by STATUS, use `http://`, check Wi-Fi connection and avoid guest/client-isolated networks. |
 | Dashboard works but motors do not | Check the kit batteries and power switch; arm controls and check the front guard/readings. |
 | Roaming keeps turning and then stops | Missing echoes never authorize forward travel. Check the sensor/connector and try a flat target; recovery stops after eight unsuccessful turns. |
+| Repeated sonar alarms or unexpected stops | Check the connector, sensor alignment and a flat target. Isolated glitches pause quietly; persistent bad echoes prevent travel. |
+| Roaming is too close to turn and remains stopped | A close corner vetoes rotation. A short retreat needs recent forward travel; without it, reposition the car. There is no rear sensor. |
 | Line following is incorrect | Check line sensor height and black/white polarity in Sensors, then verify a centered strip while lifted. |
 | Dashboard looks old after an update | Refresh it or open a new browser tab. |
 

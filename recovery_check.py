@@ -25,8 +25,10 @@ samples=[]
 report={'test':'lifted echo-dropout heading recovery','sensor_fault_injection':True,'passed':False}
 try:
     request('/api/stop',True)
-    initial=status();assert initial['firmware']=='CarReady-2.4'
+    initial=status();assert initial['firmware']=='CarReady-2.5'
     assert not initial['armed'] and not initial['moving']
+    report['initial']=initial
+    assert initial['front_cm'] is not None and initial['front_cm']>=55, 'Recovery needs a reliable clear front (55 cm minimum); move nearby objects away before testing.'
     with serial.Serial(args.port or ports[0],115200,timeout=2,write_timeout=2) as device:
         device.write(b'\n');time.sleep(.15);device.reset_input_buffer()
         device.write(b'TESTNOECHO LIFTED\n')
@@ -48,7 +50,7 @@ try:
     assert max(s['escape_turns'] for s in samples)>=2
     forward=[s for s in samples if not s['test_echo_muted'] and s['moving'] and all(v<0 for v in s['wheels'])]
     assert forward,'Real sensor restored, but this placement never provided a clear forward route'
-    assert all(s['front_cm'] is not None and s['front_cm']>=35 for s in forward)
+    assert all(s['front_cm'] is not None and s['front_cm']>=45 for s in forward)
     final=samples[-1];assert not final['armed'] and final['wheels']==[0]*4 and not final['test_echo_muted']
     assert final['notice']=='Roaming timer finished',final['notice']
     report.update(passed=True,turn_samples=len(turn_samples),forward_samples=len(forward),

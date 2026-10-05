@@ -51,7 +51,7 @@ try:
     code, page = request('/')
     assert code == 200
     token = re.search(r"const token='([a-f0-9]+)'", page)[1]
-    assert status()['firmware'] == 'CarReady-2.4'
+    assert status()['firmware'] == 'CarReady-2.5'
     record('new dashboard and stopped boot', status=stopped())
     assert request('/api/control?op=arm&guard=1', True, False)[0] == 403
     record('unauthorized control rejected')
@@ -101,6 +101,13 @@ try:
     command('brightness',value=12)
     record('extra LED effects, brightness, stationary party, and sound toggle')
     if args.lifted:
+        for enabled in (0, 1):
+            command('mode', name='pilot', speed=20, seconds=5, backtrack=enabled)
+            assert status()['backtrack_enabled'] == bool(enabled)
+            request('/api/stop', True, False)
+        assert request('/api/control?op=mode&name=pilot&speed=20&backtrack=2',True)[0] == 400
+        stopped()
+        record('recent-path retreat toggle and bounds')
         # Fixed expected wheel patterns from Freenove's movement examples.
         vectors = [
             ('forward',0,1,0,[-25,-25,-25,-25]),
@@ -176,7 +183,14 @@ try:
             samples.append(s)
             assert max(abs(v) for v in s['wheels']) <= 25
             if s['armed']:
-                command('heartbeat')
+                code, body = request('/api/control?op=heartbeat', True)
+                if code == 409:
+                    # The show can finish between the status read and renewal.
+                    final = stopped()
+                    assert time.monotonic()-started >= 9.8 and final['notice'] == 'Show finished', final
+                    samples.append(final)
+                    break
+                assert code == 200, (code, body)
             time.sleep(.16)
         stopped()
         patterns={tuple(s['wheels']) for s in samples if s['moving']}

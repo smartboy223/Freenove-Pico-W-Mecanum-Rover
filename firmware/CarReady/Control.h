@@ -4,6 +4,7 @@
 #include "RoamPolicy.h"
 #include "EchoPolicy.h"
 #include "LinePolicy.h"
+#include "RangePolicy.h"
 #include <pico/time.h>
 #include <pico/rand.h>
 #include <hardware/sync.h>
@@ -17,6 +18,7 @@ int lightBaseline[2]={0,0},wheelOutput[4]={0,0,0,0};
 float echoes[5]={-1,-1,-1,-1,-1};int echoPosition=0,echoCount=0;
 uint32_t echoTime=0,modeStart=0,lastEffects=0;
 bool diagnosticEchoMuted=false; // USB-only lifted-car fault injection; cleared by every Stop/reset.
+bool diagnosticBlocked=false;int diagnosticBlockedPhase=0;
 volatile uint32_t beepUntil=0;
 volatile uint16_t buzzerStep=6554,buzzerDuty=32768;
 int buzzerVolume=60,buzzerFrequency=2000,userTone=2000;
@@ -28,6 +30,10 @@ float pilotCenter=-1;uint32_t lastCruiseScan=0;
 int scanLeftAngle=60;
 bool escapeEnabled=true,pilotEscape=false,pilotSurvey=false;
 int pilotTurns=0,pilotDirection=0;
+bool backtrackEnabled=true,pilotHold=false;
+bool pilotTurnStarted=false;uint32_t pilotTurnAt=0;
+uint32_t pilotHoldAt=0,pilotLastTick=0,pilotForwardAt=0,pilotForwardCredit=0,pilotRetreatMs=0;
+int pilotRetreats=0;float pilotRetreatFront=-1;
 String pilotAction="Stopped";
 int wideLeftAngle(){return scanLeftAngle==60 ? 30 : 150;}
 float pilotScan[5]={-1,-1,-1,-1,-1};bool pilotExploring=false;
@@ -43,6 +49,8 @@ bool soundAlerts=true,partySound=false;
 int ledBrightness=12;
 String alertName="";uint32_t alertStarted=0,lastWarning=0,lastPartyBeat=0;
 int alertPulses=0;
+uint32_t warningTimes[8]={};bool warningSeen[8]={};
+bool rangeGapActive=false;uint32_t rangeGapAt=0;
 uint32_t lastBatterySample=0;uint8_t lowBatterySamples=0;
 String ledStyle="auto";
 volatile bool safetyActive=false,safetyExpired=false;
@@ -70,9 +78,17 @@ void fullStop() {
   melodyActive=false;pilotAction="Stopped";pilotTurns=0;pilotDirection=0;pilotEscape=false;pilotSurvey=false;
   lineLastSeen=0;lineAction="Stopped";
   diagnosticEchoMuted=false;
+  diagnosticBlocked=false;diagnosticBlockedPhase=0;
+  pilotHold=false;pilotTurnStarted=false;pilotForwardAt=pilotForwardCredit=0;pilotLastTick=millis();pilotRetreats=0;
+  rangeGapActive=false;for(bool &v:warningSeen)v=false;
 }
 int warningPitch(const String &name){return name=="obstacle" ? 1400 : name=="sensor" ? 900 : name=="battery" ? 550 : name=="turn" ? 1800 : name=="finished" ? 2200 : 1100;}
-void alert(const char *name,int pulses) {if(alertName==name && (alertPulses || uint32_t(millis()-lastWarning)<800))return;lastWarning=millis();alertName=name;alertStarted=millis();alertPulses=pulses;if(soundAlerts)playTone(warningPitch(alertName),80);}
+void alert(const char *name,int pulses) {
+  String kind=name;int id=kind=="sensor" ? 0 : kind=="obstacle" ? 1 : kind=="turn" ? 2 : kind=="blocked" ? 3 : kind=="line" ? 4 : kind=="battery" ? 5 : kind=="finished" ? 6 : 7;
+  uint32_t cooldown=id==0 || id==3 ? 5000 : id==1 ? 2000 : id==2 || id==4 ? 3000 : 800;
+  if(!warningDue(millis(),warningTimes[id],warningSeen[id],cooldown))return;
+  warningTimes[id]=millis();warningSeen[id]=true;lastWarning=millis();alertName=name;alertStarted=millis();alertPulses=pulses;if(soundAlerts)playTone(warningPitch(alertName),80);
+}
 void alertTick() {
   if(!alertPulses)return;
   uint32_t elapsed=millis()-alertStarted;
@@ -90,6 +106,7 @@ void recordEcho(unsigned long duration) {
   float value=duration ? duration*.017f : -1;
   distanceCm=value;
   if(diagnosticEchoMuted)value=-1;
+  if(diagnosticBlocked && diagnosticBlockedPhase==1)value=12;
   if(uint32_t(millis()-headMovedAt)<180)return;
   echoes[echoPosition]=value;echoPosition=(echoPosition+1)%5;if(echoCount<5)echoCount++;
   echoTime=millis();
@@ -100,14 +117,29 @@ float filteredEcho() {
   // A current miss stops travel immediately; one older missed echo need not poison five later readings.
   return stableEcho(echoes,echoCount,(echoPosition+4)%5);
 }
+float latestEcho(){return echoCount && uint32_t(millis()-echoTime)<=200 ? echoes[(echoPosition+4)%5] : -1;}
+bool rawNear(float threshold){float d=latestEcho();return validEcho(d) && d<threshold;}
+bool confirmedNear(float threshold){return echoCount>=2 && uint32_t(millis()-echoTime)<=200 && confirmedNearEcho(echoes,echoCount,(echoPosition+4)%5,threshold);}
+void rangeWarning(bool obstacle,float threshold=FRONT_STOP_CM) {
+  if(obstacle){rangeGapActive=false;if(confirmedNear(threshold))alert("obstacle",2);return;}
+  if(!rangeGapActive){rangeGapAt=millis();rangeGapActive=true;}
+  if(uint32_t(millis()-rangeGapAt)>=1200 && uint32_t(millis()-headMovedAt)>=380)alert("sensor",3);
+}
 const char* modeName() {
   switch(runMode){case MANUAL:return "manual";case LINE:return "line";case LIGHT:return "light";case PILOT:return "pilot";case SHOW:return "show";case USB_CONTROL:return "USB";case REMOTE_MANUAL:return "remote";default:return "idle";}
 }
 bool guardedMotion(int x,int y,int rotation) {
   if(frontGuard && y>0) {
     float distance=filteredEcho();
-    if(matrixPresent || headAngle!=90 || distance<0 || distance<25) {
-      haltMotion();notice=matrixPresent ? "Forward guard needs the ultrasonic module" : (distance<0 ? "Forward blocked: no reliable front echo" : "Forward blocked: obstacle closer than 25 cm");alert(distance<0 ? "sensor" : "obstacle",distance<0 ? 3 : 2);return false;
+    if(matrixPresent || headAngle!=90 || distance<0 || distance<FRONT_STOP_CM || rawNear(FRONT_STOP_CM)) {
+      haltMotion();bool near=(distance>=0 && distance<FRONT_STOP_CM) || rawNear(FRONT_STOP_CM);
+      notice=matrixPresent ? "Forward guard needs the ultrasonic module" : headAngle!=90 ? "Forward blocked: head is scanning" : near ? "Forward blocked: checking close echo" : "Forward blocked: waiting for reliable front echo";
+      if(headAngle==90 && !matrixPresent)rangeWarning(near);return false;
+    }
+    rangeGapActive=false;
+    // Clear a resolved range alert when verified forward travel resumes.
+    if(alertName=="sensor" || alertName=="obstacle" || alertName=="blocked") {
+      alertPulses=0;alertName="";beepUntil=0;
     }
   }
   int values[4];mecanumMix(x,y,rotation,speedLimit,values);
@@ -136,6 +168,7 @@ void calibrateLight() {
   for(int i=0;i<16;i++){left+=adcAverage(28);right+=adcAverage(27);}
   lightBaseline[0]=left/16;lightBaseline[1]=right/16;lightCalibrated=true;notice="Ambient light baseline set; now aim the flashlight";
 }
+bool pilotForwardMoving(){return moving && wheelOutput[0]<0 && wheelOutput[1]<0 && wheelOutput[2]<0 && wheelOutput[3]<0;}
 #include "Pilot.h"
 void effectsTick() {
   if(uint32_t(millis()-lastEffects)<50)return;lastEffects=millis();
@@ -168,6 +201,10 @@ void controlTick() {
   if(safetyExpired){expireControl();return;}
   if(armed && autonomousRoam)lease(min(uint32_t(750),roamDeadline-millis()));
   if(diagnosticEchoMuted && runMode==PILOT && pilotTurns>=2 && pilotStage==7){diagnosticEchoMuted=false;resetEchoes();}
+  if(diagnosticBlocked && runMode==PILOT){
+    if(diagnosticBlockedPhase==0 && pilotForwardCredit>=900){diagnosticBlockedPhase=1;resetEchoes();}
+    if(diagnosticBlockedPhase==1 && pilotRetreats>=1 && pilotStage!=9){diagnosticBlockedPhase=2;resetEchoes();}
+  }
   if(!armed){effectsTick();return;}
   // Reject sustained low supply, allowing short motor-start and ADC transients.
   if(uint32_t(millis()-lastBatterySample)>=100) {
@@ -244,7 +281,8 @@ String controlRequest(const String &target,const String &headers,int &code) {
       if(valueOf(target,"autonomous").length() && !parameterInt(valueOf(target,"autonomous"),0,1,detached))return fail(400,"Invalid autonomous setting");
       if(valueOf(target,"scanleft").length() && (!parameterInt(valueOf(target,"scanleft"),60,120,leftAngle) || (leftAngle!=60 && leftAngle!=120)))return fail(400,"Scan left angle must be 60 or 120");
       int escape=1;if(valueOf(target,"escape").length() && !parameterInt(valueOf(target,"escape"),0,1,escape))return fail(400,"Invalid escape setting");
-      scanLeftAngle=leftAngle;escapeEnabled=escape;
+      int backtrack=1;if(valueOf(target,"backtrack").length() && !parameterInt(valueOf(target,"backtrack"),0,1,backtrack))return fail(400,"Invalid retreat setting");
+      scanLeftAngle=leftAngle;escapeEnabled=escape;backtrackEnabled=backtrack;
     }
     startRun(requested,who,1000);speedLimit=s;
     if(requested==PILOT){roamDeadline=millis()+uint32_t(seconds)*1000;hardRunDeadline=roamDeadline;autonomousRoam=detached;}
@@ -298,6 +336,10 @@ String controlStatus() {
   extra+=",\"roam_action\":\""+pilotAction+"\",\"escape_turns\":"+String(pilotTurns)+",\"escape_enabled\":"+String(escapeEnabled ? "true" : "false")+",\"pilot_stage\":"+String(pilotStage);
   extra+=",\"scan_left_angle\":"+String(scanLeftAngle);
   extra+=",\"test_echo_muted\":"+String(diagnosticEchoMuted ? "true" : "false");
+  extra+=",\"test_wall_phase\":"+String(diagnosticBlocked ? diagnosticBlockedPhase : -1);
+  extra+=",\"front_stop_cm\":"+String(FRONT_STOP_CM)+",\"range_pending\":"+String(rawNear(FRONT_STOP_CM) && !confirmedNear(FRONT_STOP_CM) ? "true" : "false");
+  extra+=",\"backtrack_enabled\":"+String(backtrackEnabled ? "true" : "false")+",\"retreats\":"+String(pilotRetreats);
+  extra+=",\"retreat_available\":"+String(armed && runMode==PILOT && retreatBudget(pilotForwardCredit,uint32_t(millis()-pilotForwardAt),pilotRetreats,backtrackEnabled && escapeEnabled)>0 ? "true" : "false");
   extra+=",\"line_black\":"+String(lineBlack)+",\"line_action\":\""+lineAction+"\",\"radar\":[";
   for(int i=0;i<9;i++){if(i)extra+=",";uint32_t age=millis()-radarTime[i];extra+="["+String(30+i*15)+","+(radarTime[i] && age<6000 && radarDistance[i]>=0 ? String(radarDistance[i],1) : String("null"))+","+String(age)+"]";}extra+="]";
   extra+=",\"sound_volume\":"+String(buzzerVolume)+",\"tone_hz\":"+String(userTone)+",\"playing_melody\":"+String(melodyActive ? "true" : "false");
