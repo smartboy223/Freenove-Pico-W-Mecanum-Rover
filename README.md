@@ -1,10 +1,10 @@
 # 🤖 Freenove Pico W Mecanum Rover
 
-CarReady **2.5** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, RGB effects and sound alerts. The dashboard runs on the Pico W itself; the PC is needed for setup and flashing only.
+CarReady **2.6** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, RGB effects and sound alerts. The dashboard runs on the Pico W itself; the PC is needed for setup and flashing only.
 
 **📱 Control from your phone · 🛞 Move in any direction · 📡 Scan obstacles · 🌈 Lights & sound**
 
-![Live Pico W dashboard showing obstacle roaming and radar](docs/images/dashboard-2.5.jpg)
+![Live Pico W dashboard showing obstacle roaming and radar](docs/images/dashboard-2.6.jpg)
 
 *Real dashboard screenshot from the tested car. The IP address and sensor readings shown are examples; yours will differ.*
 
@@ -21,7 +21,7 @@ New to Pico projects? Follow the [Windows setup below](#easy-setup), then try [y
 - Mecanum manual driving: forward, reverse, crab walks, diagonals and rotation.
 - Timed obstacle roaming with a servo-mounted ultrasonic sensor, five-angle scans, retained-direction turns and short recent-path retreats.
 - Live radar with distance labels, approximate echo sectors and selectable 100/150/300 cm range.
-- Black-line and flashlight following, with configurable sensor polarity and light baseline.
+- Black-line following and independently timed flashlight following, with left/right steering, straight travel and a calibrated room baseline.
 - Battery voltage, approximate charge level, sensor readings and individual wheel activity.
 - Chassis RGB colors, rainbow/chase/breathing effects, stationary party mode and a lifted-wheel show.
 - Buzzer tones, a short melody, approximate loudness adjustment and distinct alerts.
@@ -216,10 +216,16 @@ Radar points represent recent sensor measurements, not a room map or object shap
 
 ### 🔦 Line and flashlight following
 
-- **Line:** place a continuous black strip beneath the three underside sensors on a light surface. This installation's center-only black fixture reads `[1,0,1]`, so **black reads 0** is the default. Change polarity in **Sensors** if your hardware differs. Centered patterns drive all four wheels straight; side patterns apply gentle corrections. All-black stops; a white gap is crossed for at most 500 ms before stopping.
-- **Flashlight:** set the ambient baseline in **Sensors** with the flashlight off, then aim it at the front photoresistors. Adjust sensitivity for your room. No bright target means stopped.
+![Timed flashlight controls on the live Pico W dashboard](docs/images/dashboard-flashlight-2.6.jpg)
 
-Keep the dashboard visible for line/light modes. Real floor tracking and stopping distance depend on surface, battery, speed and sensor height.
+- **Line:** place a continuous black strip beneath the three underside sensors on a light surface. This installation's center-only black fixture reads `[1,0,1]`, so **black reads 0** is the default. Change polarity in **Sensors** if your hardware differs. Centered patterns drive all four wheels straight; side patterns apply gentle corrections. All-black stops; a white gap is crossed for at most 500 ms before stopping.
+- **Flashlight:** open **Sensors → Follow a flashlight**, or use the shortcut in **Drive**. Turn the flashlight **off** and press **Set ambient light baseline**. Choose **5–600 seconds**, speed **15–25%**, and sensitivity; press **Start timed flashlight follow**. A stronger left/right target turns toward that side, approximately balanced light drives straight, and smaller imbalances apply a gentle correction. Two distinct bright samples confirm a target; losing it pauses the wheels while the timer continues.
+
+Aim the flashlight **from above** at the board's front-corner light sensors. Keep the phone, hands and target clear of the ultrasonic beam: forward movement is blocked below 35 cm, and turning needs reliable front clearance of at least 28 cm. The live action message explains whether light is missing, the baseline is too bright, or the front guard is stopping movement. Recalibrate with the flashlight off if room lighting changes or the Pico restarts.
+
+**Keep following if I leave this page** is checked by default. The Pico owns the countdown, stops/disarms at its deadline, and allows you to leave the page. Uncheck it if you want following to require an active page. Stop, Wi-Fi loss and low battery still stop the car.
+
+Keep the dashboard visible for line mode and flashlight mode with independent running disabled. Real floor tracking and stopping distance depend on surface, battery, speed and sensor height.
 
 ## 🌈 Lights, sound and swapping modules
 
@@ -242,9 +248,10 @@ To swap the front module: switch the car off, unplug USB, fit the ultrasonic sen
 | `python lan_check.py` | HTTP compatibility checks |
 | `python http_recovery_check.py` | Stopped-car HTTP stress and intentional watchdog restart |
 | `python recovery_check.py --lifted` | Live fault-injection test: two turns with echoes suppressed, then restore the real sensor |
+| `python light_follow_check.py --lifted` | 32-second real flashlight sequence: left, right, both, then off; no heartbeats |
 | `python blocked_recovery_check.py --lifted` | Real forward travel, simulated wall, bounded retreat, then real ranging and resumed travel |
 
-Live tests write local JSON evidence, excluded from the repository. Scripts other than `control_check.py`, `recovery_check.py` and `blocked_recovery_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. See [validation notes](docs/VALIDATION.md) for current results and limits.
+Live tests write local JSON evidence, excluded from the repository. Scripts other than `control_check.py`, `recovery_check.py`, `blocked_recovery_check.py` and `light_follow_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. See [validation notes](docs/VALIDATION.md) for current results and limits.
 
 Clear the front by at least 80 cm before either lifted recovery test; their preflight check requires a reliable reading of at least 55 cm. The USB recovery diagnostic requires the exact command `TESTNOECHO LIFTED`. It intentionally suppresses filtered echoes until two turns complete, then restores real sonar readings; an independent 15-second deadline ends the test. Stop, reset and watchdog recovery clear the diagnostic. The separate `TESTBLOCKED LIFTED` diagnostic starts with real forward travel, simulates a 12 cm wall to exercise the retreat, restores real sonar, and stops at an independent 18-second deadline. Both diagnostics clear on Stop/reset. These are lifted-wheel tests, not floor-navigation certification.
 
@@ -258,6 +265,7 @@ build.ps1               Generate dashboard/credentials and compile
 prepare_wifi.py         Read local Wi-Fi settings without logging credentials
 prepare_dashboard.py    Embed the dashboard HTML in firmware
 car_tool.py             USB setup/status/Stop commands
+light_follow_check.py    Timed real-light following test
 recovery_check.py        Lifted-car heading-recovery test
 blocked_recovery_check.py Lifted-car recent-path retreat test
 prepare_repo.py         Prepare a clean repository copy without local secrets/artifacts
@@ -287,6 +295,7 @@ Keep the original licenses with vendored code; see [third-party notices](THIRD-P
 | Roaming keeps turning and then stops | Missing echoes never authorize forward travel. Check the sensor/connector and try a flat target; recovery stops after eight unsuccessful turns. |
 | Repeated sonar alarms or unexpected stops | Check the connector, sensor alignment and a flat target. Isolated glitches pause quietly; persistent bad echoes prevent travel. |
 | Roaming is too close to turn and remains stopped | A close corner vetoes rotation. A short retreat needs recent forward travel; without it, reposition the car. There is no rear sensor. |
+| Light readings change but the car does not follow | Set the baseline with flashlight off, use Start timed flashlight follow, and check its action message/front clearance. A phone in the sonar beam can block movement. |
 | Line following is incorrect | Check line sensor height and black/white polarity in Sensors, then verify a centered strip while lifted. |
 | Dashboard looks old after an update | Refresh it or open a new browser tab. |
 

@@ -5,6 +5,7 @@
 #include "EchoPolicy.h"
 #include "LinePolicy.h"
 #include "RangePolicy.h"
+#include "LightPolicy.h"
 #include <pico/time.h>
 #include <pico/rand.h>
 #include <hardware/sync.h>
@@ -15,6 +16,8 @@ String controller="",notice="Stopped",controlToken="";
 bool frontGuard=true;
 int driveX=0,driveY=0,driveR=0,speedLimit=25,headAngle=90,lightThreshold=3;
 int lightBaseline[2]={0,0},wheelOutput[4]={0,0,0,0};
+String lightAction="Stopped";bool lightTargetSeen=false;
+uint8_t lightConfirmSamples=0;uint32_t lightSampleAt=0;
 float echoes[5]={-1,-1,-1,-1,-1};int echoPosition=0,echoCount=0;
 uint32_t echoTime=0,modeStart=0,lastEffects=0;
 bool diagnosticEchoMuted=false; // USB-only lifted-car fault injection; cleared by every Stop/reset.
@@ -42,8 +45,8 @@ uint32_t lineLastSeen=0;
 float radarDistance[9]={-1,-1,-1,-1,-1,-1,-1,-1,-1};uint32_t radarTime[9]={};
 void clearRadar(){for(int i=0;i<9;i++){radarDistance[i]=-1;radarTime[i]=0;}}
 int scanAngle(int index){int angles[]={30,60,90,120,150};return scanLeftAngle==60 ? angles[index] : 180-angles[index];}
-bool autonomousRoam=false;
-uint32_t roamDeadline=0;
+bool autonomousRun=false;
+uint32_t runDeadline=0;
 volatile uint32_t hardRunDeadline=0;
 bool soundAlerts=true,partySound=false;
 int ledBrightness=12;
@@ -73,10 +76,11 @@ void fullStop() {
   safetyActive=false;safetyExpired=false;armed=false;runMode=IDLE;controller="";
   driveX=driveY=driveR=0;stopMotors();for(int &v:wheelOutput)v=0;
   beepUntil=0;gpio_put(2,0);chassisLeds.clear();chassisLeds.show();notice="Stopped and disarmed";
-  autonomousRoam=false;roamDeadline=0;hardRunDeadline=0;partySound=false;ledStyle="auto";
+  autonomousRun=false;runDeadline=0;hardRunDeadline=0;partySound=false;ledStyle="auto";
   alertPulses=0;alertName="";lastWarning=millis()-1500;
   melodyActive=false;pilotAction="Stopped";pilotTurns=0;pilotDirection=0;pilotEscape=false;pilotSurvey=false;
   lineLastSeen=0;lineAction="Stopped";
+  lightAction="Stopped";lightTargetSeen=false;lightConfirmSamples=0;lightSampleAt=0;
   diagnosticEchoMuted=false;
   diagnosticBlocked=false;diagnosticBlockedPhase=0;
   pilotHold=false;pilotTurnStarted=false;pilotForwardAt=pilotForwardCredit=0;pilotLastTick=millis();pilotRetreats=0;
@@ -170,6 +174,7 @@ void calibrateLight() {
 }
 bool pilotForwardMoving(){return moving && wheelOutput[0]<0 && wheelOutput[1]<0 && wheelOutput[2]<0 && wheelOutput[3]<0;}
 #include "Pilot.h"
+#include "Light.h"
 void effectsTick() {
   if(uint32_t(millis()-lastEffects)<50)return;lastEffects=millis();
   if(alertPulses){chassisLeds.fill(chassisLeds.Color((millis()/100)%2 ? 255 : 15,0,0));}
@@ -191,15 +196,16 @@ void effectsTick() {
   if(melodyActive && !alertPulses){uint32_t t=millis()-melodyStarted;static const int notes[]={523,659,784,1047,784,659};if(t>=1800)melodyActive=false;else if(t%300<200)playTone(notes[t/300],25);}
 }
 void expireControl() {
-  bool finished=roamDeadline && int32_t(millis()-roamDeadline)>=0;
-  fullStop();notice=finished ? "Roaming timer finished" : "Control timeout: stopped";
+  bool finished=runDeadline && int32_t(millis()-runDeadline)>=0;
+  bool lightFinished=runMode==LIGHT;
+  fullStop();notice=finished ? lightFinished ? "Flashlight timer finished" : "Roaming timer finished" : "Control timeout: stopped";
   alert(finished ? "finished" : "timeout",finished ? 2 : 3);
 }
 void controlTick() {
   alertTick();
-  if(armed && roamDeadline && int32_t(millis()-roamDeadline)>=0){expireControl();return;}
+  if(armed && runDeadline && int32_t(millis()-runDeadline)>=0){expireControl();return;}
   if(safetyExpired){expireControl();return;}
-  if(armed && autonomousRoam)lease(min(uint32_t(750),roamDeadline-millis()));
+  if(armed && autonomousRun)lease(min(uint32_t(750),runDeadline-millis()));
   if(diagnosticEchoMuted && runMode==PILOT && pilotTurns>=2 && pilotStage==7){diagnosticEchoMuted=false;resetEchoes();}
   if(diagnosticBlocked && runMode==PILOT){
     if(diagnosticBlockedPhase==0 && pilotForwardCredit>=900){diagnosticBlockedPhase=1;resetEchoes();}
@@ -221,11 +227,8 @@ void controlTick() {
     if(bits!=0 && steering!=99)lineLastSeen=millis();
     if(steering==99 || (bits==0 && uint32_t(millis()-lineLastSeen)>500)) {haltMotion();lineAction=bits==7 ? "All black / no floor: stopped" : "White gap exceeded 500 ms: waiting for line";notice=lineAction;alert("line",1);}
     else {lineAction=steering==0 ? (bits==0 ? "Crossing short white gap: straight" : "Centered: straight forward") : steering<0 ? "Correcting left" : "Correcting right";if(guardedMotion(0,min(speedLimit,28),steering))notice=lineAction;}
-  }else if(runMode==LIGHT) {
-    int left=max(0,lightAdc[0]-lightBaseline[0]),right=max(0,lightAdc[1]-lightBaseline[1]);
-    if(max(left,right)<lightThreshold){haltMotion();notice="Waiting for a brighter light target";}
-    else {int rotation=constrain((right-left)/2,-14,14);guardedMotion(0,min(speedLimit,18),rotation);notice=moving ? "Following light target" : notice;}
-  }else if(runMode==PILOT)pilotTick();
+  }else if(runMode==LIGHT)lightTick();
+  else if(runMode==PILOT)pilotTick();
   else if(runMode==SHOW) {
     uint32_t elapsed=millis()-modeStart;
     if(elapsed>=10000){fullStop();notice="Show finished";return;}
@@ -276,16 +279,18 @@ String controlRequest(const String &target,const String &headers,int &code) {
     if(requested==LIGHT && !parameterInt(valueOf(target,"threshold"),1,80,lightThreshold))return fail(400,"Invalid sensitivity");
     if(requested==LINE && valueOf(target,"lineblack").length() && !parameterInt(valueOf(target,"lineblack"),0,1,lineBlack))return fail(400,"Invalid line polarity");
     int seconds=60,detached=0,leftAngle=scanLeftAngle;
-    if(requested==PILOT) {
+    if(requested==PILOT || requested==LIGHT) {
       if(valueOf(target,"seconds").length() && !parameterInt(valueOf(target,"seconds"),5,600,seconds))return fail(400,"Timer must be 5 to 600 seconds");
       if(valueOf(target,"autonomous").length() && !parameterInt(valueOf(target,"autonomous"),0,1,detached))return fail(400,"Invalid autonomous setting");
+    }
+    if(requested==PILOT) {
       if(valueOf(target,"scanleft").length() && (!parameterInt(valueOf(target,"scanleft"),60,120,leftAngle) || (leftAngle!=60 && leftAngle!=120)))return fail(400,"Scan left angle must be 60 or 120");
       int escape=1;if(valueOf(target,"escape").length() && !parameterInt(valueOf(target,"escape"),0,1,escape))return fail(400,"Invalid escape setting");
       int backtrack=1;if(valueOf(target,"backtrack").length() && !parameterInt(valueOf(target,"backtrack"),0,1,backtrack))return fail(400,"Invalid retreat setting");
       scanLeftAngle=leftAngle;escapeEnabled=escape;backtrackEnabled=backtrack;
     }
     startRun(requested,who,1000);speedLimit=s;
-    if(requested==PILOT){roamDeadline=millis()+uint32_t(seconds)*1000;hardRunDeadline=roamDeadline;autonomousRoam=detached;}
+    if(requested==PILOT || requested==LIGHT){runDeadline=millis()+uint32_t(seconds)*1000;hardRunDeadline=runDeadline;autonomousRun=detached;}
   }else if(op=="calibrate")calibrateLight();
   else if(op=="lineconfig"){int black;if(!parameterInt(valueOf(target,"black"),0,1,black))return fail(400,"Invalid line polarity");fullStop();lineBlack=black;notice="Line polarity updated; car stopped";}
   else if(op=="servo") {if(!parameterInt(valueOf(target,"angle"),30,150,angle))return fail(400,"Invalid head angle");fullStop();setHead(angle);notice="Head repositioned; movement stopped";}
@@ -329,8 +334,9 @@ String controlStatus() {
   extra+=",\"wheels\":["+String(wheelOutput[0])+","+String(wheelOutput[1])+","+String(wheelOutput[2])+","+String(wheelOutput[3])+"]";
   extra+=",\"light_calibrated\":"+String(lightCalibrated ? "true" : "false")+",\"light_threshold\":"+String(lightThreshold);
   extra+=",\"light_delta\":["+String(lightAdc[0]-lightBaseline[0])+","+String(lightAdc[1]-lightBaseline[1])+"]";
+  extra+=",\"light_action\":\""+lightAction+"\",\"light_target\":"+String(lightTargetSeen ? "true" : "false");
   extra+=",\"range_quality\":\""+String(matrixPresent ? "Matrix fitted" : filteredEcho()<0 ? "Unreliable or settling" : "Valid recent echoes")+"\",\"head_cm\":"+(filteredEcho()<0 ? String("null") : String(filteredEcho(),1));
-  extra+=",\"autonomous\":"+String(autonomousRoam ? "true" : "false")+",\"remaining_s\":"+String(roamDeadline ? max(0,int32_t(roamDeadline-millis()+999)/1000) : 0);
+  extra+=",\"autonomous\":"+String(autonomousRun ? "true" : "false")+",\"remaining_s\":"+String(runDeadline ? max(0,int32_t(runDeadline-millis()+999)/1000) : 0);
   extra+=",\"scan_cm\":["+(pilotLeft<0 ? String("null") : String(pilotLeft,1))+","+(pilotCenter<0 ? String("null") : String(pilotCenter,1))+","+(pilotRight<0 ? String("null") : String(pilotRight,1))+"]";
   extra+=",\"led_effect\":\""+ledStyle+"\",\"brightness\":"+String(ledBrightness)+",\"sound_alerts\":"+String(soundAlerts ? "true" : "false")+",\"alert\":\""+alertName+"\"";
   extra+=",\"roam_action\":\""+pilotAction+"\",\"escape_turns\":"+String(pilotTurns)+",\"escape_enabled\":"+String(escapeEnabled ? "true" : "false")+",\"pilot_stage\":"+String(pilotStage);

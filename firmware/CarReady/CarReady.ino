@@ -60,7 +60,7 @@ void eyes(bool blink) {
 
 String statusJson() {
   if(safetyExpired)expireControl();
-  String result="{\"firmware\":\"CarReady-2.5\",\"board\":\"Pico W\",\"module\":\"";
+  String result="{\"firmware\":\"CarReady-2.6\",\"board\":\"Pico W\",\"module\":\"";
   result+=matrixPresent ? "matrix" : "ultrasonic";
   result+="\",\"armed\":"; result+=armed ? "true" : "false";
   result+=",\"moving\":"; result+=moving ? "true" : "false";
@@ -135,15 +135,15 @@ void handleCommand() {
   else if(!strcmp(command,"TESTBLOCKED LIFTED")) {
     if(matrixPresent){fullStop();Serial.println("ERR fit ultrasonic for recovery test");return;}
     startRun(PILOT,"USB-blocked-test",1000);speedLimit=25;escapeEnabled=backtrackEnabled=true;
-    diagnosticBlocked=true;diagnosticBlockedPhase=0;autonomousRoam=true;
-    roamDeadline=millis()+18000;hardRunDeadline=roamDeadline;
+    diagnosticBlocked=true;diagnosticBlockedPhase=0;autonomousRun=true;
+    runDeadline=millis()+18000;hardRunDeadline=runDeadline;
     Serial.println("OK lifted blocked-route test: real forward, simulated wall, short retreat, real sonar; 18 second stop");
   }
   else if(!strcmp(command,"TESTNOECHO LIFTED")) {
     if(matrixPresent){fullStop();Serial.println("ERR fit ultrasonic for recovery test");return;}
     startRun(PILOT,"USB-recovery-test",1000);speedLimit=25;
-    diagnosticEchoMuted=true;resetEchoes();autonomousRoam=true;
-    roamDeadline=millis()+15000;hardRunDeadline=roamDeadline;
+    diagnosticEchoMuted=true;resetEchoes();autonomousRun=true;
+    runDeadline=millis()+15000;hardRunDeadline=runDeadline;
     Serial.println("OK lifted recovery test: echoes muted until two pivots; 15 second stop");
   }
   else if(!strcmp(command,"TESTWATCHDOG")) {

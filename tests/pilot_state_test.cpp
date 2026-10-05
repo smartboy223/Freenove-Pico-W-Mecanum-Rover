@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include "roam_policy_test.cpp"
+#include "light_state_test.cpp"
 using std::min;using std::max;
 using String=std::string;
 // Hardware boundaries are substituted; Pilot.h is the production state machine.
@@ -70,6 +71,7 @@ void run(uint32_t duration){
   }
 }
 int main(){
+  light_test::runTests();
   reset(MISSING);run(35000);
   assert(!armed && turnStarts==8 && forwardTicks==0 && outputR==0 && radarClears==8);
   std::cout<<"PASS: all missing echoes -> eight same-direction turns -> stopped; never advances\n";

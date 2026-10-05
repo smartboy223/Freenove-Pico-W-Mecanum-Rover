@@ -1,4 +1,4 @@
-# Physical remote — CarReady-2.5
+# Physical remote — CarReady-2.6
 
 The remote is enabled. Aim it at the car's IR receiver. Line following uses the dashboard's polarity setting; this car is calibrated to black reads 0.
 
@@ -22,3 +22,5 @@ Manual movement expires after 350 ms without repeat frames. Automatic remote mod
 While the dashboard owns an armed car, the remote can stop it with ▶ or 9; other remote commands wait until it is disarmed. The dashboard cannot take over an active remote session without Stop first. TEST and + raw codes were physically verified; full button operation and floor behavior still need individual checks.
 
 Dashboard: **http://192.168.0.202/**. Power is not an emergency-stop button in this firmware. Use ▶, 9, or the large dashboard Stop button.
+
+The dashboard has a separate 5–600 second flashlight timer in Sensors. The remote C button continues to use its short repeat-frame lease; it does not start the dashboard timer.

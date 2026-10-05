@@ -51,7 +51,7 @@ try:
     code, page = request('/')
     assert code == 200
     token = re.search(r"const token='([a-f0-9]+)'", page)[1]
-    assert status()['firmware'] == 'CarReady-2.5'
+    assert status()['firmware'] == 'CarReady-2.6'
     record('new dashboard and stopped boot', status=stopped())
     assert request('/api/control?op=arm&guard=1', True, False)[0] == 403
     record('unauthorized control rejected')
@@ -68,6 +68,10 @@ try:
     stopped()
     record('idle manual lease expires')
     command('calibrate')
+    for query in ['op=mode&name=light&speed=20&threshold=80&seconds=4','op=mode&name=light&speed=20&threshold=80&seconds=601','op=mode&name=light&speed=20&threshold=80&autonomous=2']:
+        assert request('/api/control?'+query,True)[0] == 400
+        stopped()
+    record('flashlight timer and independent-run bounds')
     command('mode', name='light', speed=20, threshold=80)
     time.sleep(.25)
     s=status()
