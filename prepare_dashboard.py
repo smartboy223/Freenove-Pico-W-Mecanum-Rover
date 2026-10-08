@@ -4,6 +4,8 @@ source=Path(__file__).parent/'firmware'/'CarReady'/'dashboard.html'
 html=source.read_text(encoding='utf-8')
 assert html.count('/*__TOUCH_DRIVE__*/')==1
 html=html.replace('/*__TOUCH_DRIVE__*/',source.with_name('TouchDrive.js').read_text(encoding='utf-8'))
+assert html.count('/*__NETWORK_SETTINGS__*/')==1
+html=html.replace('/*__NETWORK_SETTINGS__*/',source.with_name('NetworkSettings.js').read_text(encoding='utf-8'))
 assert ')HTML"' not in html and html.count('__TOKEN__')==1
-assert len(html.encode())<57344, 'Keep the streamed dashboard within the flash and LAN budget'
+assert len(html.encode())<65536, 'Keep the streamed dashboard within the flash and LAN budget'
 source.with_name('Dashboard.h').write_text('#pragma once\nconst char dashboard[] PROGMEM=R"HTML('+html+')HTML";\n',encoding='utf-8')

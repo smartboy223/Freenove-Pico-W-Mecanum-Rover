@@ -1,6 +1,9 @@
 #include "../firmware/CarReady/WifiSettings.h"
 namespace wifi_test {
 void runTests(){
+  assert(wifiJsonString("Lab \"A\" \\ room")=="\"Lab \\\"A\\\" \\\\ room\"");
+  assert(wifiJsonString("a\n\tb")=="\"a\\u000a\\u0009b\"");
+  assert(wifiJsonString("\xd9\x85")=="\"\xd9\x85\"");
   assert(wifiCredentialsValid("classroom",9,"",0));
   assert(wifiCredentialsValid("lab",3,"eight123",8));
   assert(wifiCredentialsValid("lab",3,std::string(64,'a').c_str(),64));

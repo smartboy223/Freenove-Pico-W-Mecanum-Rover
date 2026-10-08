@@ -4,6 +4,33 @@ Checked on **5–8 October 2026**, with a Pico W and Freenove FNK0089 mecanum ca
 
 ## CarReady 2.11 — open development hotspot and dashboard home-Wi-Fi setup
 
+### Network discovery, durable save/delete and interactive matrix head follow-up
+
+The connection panel now separates the saved home network from the actual radio-associated network, reports signal strength and supplies a clickable current dashboard URL and remembered home URL. An authenticated asynchronous scan lists up to 20 unique visible networks in signal order; hidden names remain available through manual entry. Network text is JSON-escaped in firmware and inserted as text in the browser. Passwords remain absent from status and scan responses.
+
+Successful save, failed-join outcome, deletion and the last home IP are retained in LittleFS. Forget writes a persistent tombstone that disables compiled credentials as well as removing saved credentials. A later successful save clears it. Network switches fully disassociate the radio before the controlled CPU restart. Connection confirmation then checks the radio SSID and DHCP address and requires a stable association before saving a candidate. Candidate confirmation is suspended throughout the 300 ms queued-switch response window, so the still-connected previous network cannot mark an unavailable new SSID as saved. Scanning blocks dashboard, USB and remote movement.
+
+The matrix-mounted servo follows actual wheel output for crab/turn/diagonal movement, stays centered for straight travel and uses bounded stationary party/effect poses. Motion is smoothed to three degrees per 40 ms. Dashboard controls toggle automatic head motion and reverse its mounting direction. Explicit head commands hold for five seconds; Stop ends effects and centers the automatic head. Ultrasonic scanning is unchanged.
+
+The native checks passed **72 compile-time assertions** and **30 runtime groups**, including production head mapping and bounded party poses. The mobile fixture passed **16 groups**, including discovered secure/open networks, saved/actual network/URL presentation, durable deletion display, rejected-input feedback and interactive-head settings. Its public screenshot uses demonstration network names. Firmware built with **530,236 bytes** of program storage and **76,716 bytes** of global RAM.
+
+`network_settings_check.py --allow-forget --test-update` passed **10 live stopped-car groups**: saved/actual connection and URL, home scanning, rejected unauthorized deletion, unavailable-SSID rollback, hotspot scanning with its dashboard still active, persistent forgetting of saved and compiled defaults, deletion surviving watchdog restart, deletion surviving an authenticated wireless firmware update, a successful new save with its LAN URL, and that save/result surviving another restart. The original real home network was restored, the temporary Windows profile was removed, and the PC Wi-Fi adapter returned to disconnected. Final car state is home Wi-Fi at **192.168.0.202**, stopped/disarmed. Local evidence is ignored `network-settings-check.json`.
+
+Three live stationary matrix-head groups passed: party produced at least eight commanded servo angles within 70–110 degrees and changing matrix/RGB/buzzer feedback, with every sampled wheel output zero; disabling automatic head motion held a manually selected angle during party; and a manual head command held for five seconds before returning smoothly to 90 degrees. This verifies firmware commands and telemetry, not measured physical angles from a servo encoder. Directional head behavior uses actual wheel mixing in the native tests; no live wheel movement was commanded. Local evidence is ignored `matrix-head-check.json`.
+
+
+
+
+### Home-first restart and Windows launcher follow-up
+
+The 8 October follow-up adds `start.bat` and `launch_dashboard.py`. The launcher only reads USB/HTTP status, remembers a working local address in an ignored JSON file, and opens the dashboard; it does not arm, flash or command movement. Both the project launcher and the parent-folder launcher resolved the live home dashboard in checks with browser opening disabled.
+
+Ordinary restarts now prefer saved home Wi-Fi. The explicit hotspot marker is consumed once at boot; automatic fallback no longer writes a permanent hotspot preference. Pending home pairing takes priority over a stale marker. OTA preserves its active network for its completion check, then subsequent ordinary restarts return to the home-first policy. This supersedes the persistent hotspot choice described in the original 2.11 checks below.
+
+The updated native suite passed **72 compile-time assertions** and **28 runtime groups**. Firmware built with **515,716 bytes** of program storage and **76,612 bytes** of global RAM, and the stopped wireless transfer and reboot check passed.
+
+Five live stopped-car checks passed: explicit hotspot selection; a hardware-watchdog restart from hotspot returning to saved home Wi-Fi; the home dashboard responding after that restart; the unavailable-network diagnostic falling back to the open hotspot after 30 seconds; and a second restart from fallback returning to the saved home network without re-entering credentials. USB status verified saved settings, a listening dashboard and zero wheel output throughout. Final state is home Wi-Fi at **192.168.0.202**, stopped/disarmed. Evidence is recorded locally in ignored `boot-start-check.json`; this was a firmware reset test, not a physical battery disconnect.
+
 Built and installed on **8 October 2026**, with Arduino-Pico **6.2.0**. The final firmware uses **515,692 bytes** of program storage and **76,612 bytes** of global RAM. Network changes stop/disarm the car and use a controlled restart, clearing old TCP contexts before the new network starts. The hotspot choice and successful home credentials are stored in LittleFS. Failed candidate credentials do not replace the saved home network.
 
 The native suite passed **68 compile-time assertions** and **28 runtime groups**. The new production Wi-Fi parser checks open/WPA keys, length bounds, UTF-8 and URL-form special characters, while rejecting malformed encodings, embedded NUL bytes and invalid keys. The **13 browser groups** include a phone-sized home-Wi-Fi form, private POST submission with special characters, password clearing after acceptance, explicit open-network selection and rejected-input feedback. Existing touch-drive, matrix, party and network controls still pass.

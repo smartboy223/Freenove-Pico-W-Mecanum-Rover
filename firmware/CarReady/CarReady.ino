@@ -6,6 +6,7 @@
 #include <hardware/clocks.h>
 #include <hardware/watchdog.h>
 #include <WiFi.h>
+#include <pico/cyw43_arch.h>
 #include <DNSServer.h>
 #include <ArduinoOTA.h>
 #include <LittleFS.h>
@@ -35,7 +36,21 @@ uint32_t networkQueuedAt=0,homeDisconnectedAt=0;
 String homeSsid=WIFI_SSID,homePassword=WIFI_PASSWORD,pendingSsid="",pendingPassword="";
 String wifiJoinState="idle";
 bool wifiPairing=false,homeSettingsSaved=false;
+bool homeForgotten=false,wifiScanRunning=false;
+bool homeLinkVerified=false;
+uint32_t homeVerifyAt=0,homeMatchSince=0;
+String homeAssociatedSsid="";
+uint32_t wifiScanStarted=0;
+String wifiLastResult="idle",homeLastIp="",wifiScanState="idle",wifiScanResults="[]";
+String jsonText(const String &value){return String(wifiJsonString(value.c_str()).c_str());}
 bool networkReady();
+String radioHomeSsid(){
+  if(WiFi.status()!=WL_CONNECTED || !WiFi.localIP().isSet())return "";
+  struct {uint32_t length;char name[32];} reply={};
+  cyw43_arch_lwip_begin();int error=cyw43_ioctl(&cyw43_state,CYW43_IOCTL_GET_SSID,sizeof(reply),reinterpret_cast<uint8_t*>(&reply),CYW43_ITF_STA);cyw43_arch_lwip_end();
+  if(error || !reply.length || reply.length>32)return "";
+  char name[33]={};memcpy(name,reply.name,reply.length);return String(name);
+}
 void networkTick();
 void queueNetwork(uint8_t choice);
 #include "Dashboard.h"
@@ -51,6 +66,7 @@ size_t commandLength = 0;
 bool overflowed = false;
 #include "MatrixPatterns.h"
 #include "MatrixEffects.h"
+#include "HeadEffects.h"
 MatrixFace matrixFace=MatrixFace::AUTO,matrixActive=MatrixFace::EYES;
 const char *matrixSource="idle";
 int matrixOutputBrightness=4;
@@ -62,7 +78,21 @@ uint32_t otaUntil=0;
 bool otaListening=false;
 void matrixCommand(uint8_t value);
 void matrixTick(bool force=false);
+bool matrixHeadAuto=true;
+uint32_t matrixHeadAt=0,matrixHeadManualUntil=0;
+int matrixHeadTarget=90;
+const char *matrixHeadSource="idle";
 #include "Control.h"
+void matrixHeadTick(){
+  if(!matrixPresent)return;
+  if(!matrixHeadAuto || (matrixHeadManualUntil && int32_t(millis()-matrixHeadManualUntil)<0)){matrixHeadTarget=headAngle;matrixHeadSource="manual";return;}
+  MatrixEffectState state;state.selected=matrixFace;state.led=ledStyle.c_str();state.now=millis();state.effectStarted=effectStarted;
+  state.melody=melodyActive;state.melodyStarted=melodyStarted;state.warning=alertPulses>0;
+  state.expression=int32_t(state.now-expressionUntil)<0;memcpy(state.wheels,wheelOutput,sizeof(wheelOutput));
+  MatrixHeadPlan plan=matrixHeadPlan(state,scanLeftAngle);matrixHeadTarget=plan.angle;matrixHeadSource=plan.source;
+  if(uint32_t(millis()-matrixHeadAt)<40)return;matrixHeadAt=millis();
+  int delta=constrain(matrixHeadTarget-headAngle,-3,3);if(delta){headAngle+=delta;head.write(headAngle);}
+}
 
 void stopMotors() {
   for (auto &pair : motorPins) for (uint8_t pin : pair) pwm_set_gpio_level(pin, 0);
@@ -106,18 +136,25 @@ String statusJson() {
   result+=",\"battery_volts\":"+String(batteryVolts(),2)+",\"battery_percent\":"+(batteryPercent()<0 ? String("null") : String(batteryPercent()));
   result+=",\"battery_state\":\""+String(batteryState())+"\"";
   result+=",\"wifi_connected\":"; result+=networkReady() ? "true" : "false";
-  result+=",\"home_wifi_connected\":"+String(!hotspotActive && WiFi.status()==WL_CONNECTED ? "true" : "false");
+  result+=",\"home_wifi_connected\":"+String(!hotspotActive && homeLinkVerified ? "true" : "false");
   result+=",\"http_listening\":"+String(lanStarted && lanServer.status()!=0 ? "true" : "false");
   result+=",\"hotspot_open\":"+String(strlen(HOTSPOT_PASSWORD)==0 ? "true" : "false")+",\"home_settings_saved\":"+String(homeSettingsSaved ? "true" : "false")+",\"wifi_join_state\":\""+wifiJoinState+"\"";
-  result+=",\"network_mode\":\""+String(hotspotActive ? "hotspot" : WiFi.status()==WL_CONNECTED ? "home" : "connecting")+"\",\"hotspot_ssid\":\""+String(HOTSPOT_SSID)+"\",\"hotspot_ip\":\"192.168.4.1\",\"hotspot_clients\":"+String(hotspotActive ? WiFi.softAPgetStationNum() : 0);
-  result+=",\"ip\":\""; result+=hotspotActive ? WiFi.softAPIP().toString() : WiFi.status()==WL_CONNECTED ? WiFi.localIP().toString() : String("");
+  String currentIp=hotspotActive ? WiFi.softAPIP().toString() : homeLinkVerified ? WiFi.localIP().toString() : String("");
+  result+=",\"home_ssid\":"+jsonText(homeSsid)+",\"saved_ssid\":"+jsonText(homeSettingsSaved ? homeSsid : String(""));
+  result+=",\"connected_ssid\":"+jsonText(hotspotActive ? String(HOTSPOT_SSID) : homeLinkVerified ? homeAssociatedSsid : String(""));
+  result+=",\"home_settings_source\":\""+String(homeForgotten || !homeSsid.length() ? "none" : homeSettingsSaved ? "saved" : "build_default")+"\",\"wifi_last_result\":"+jsonText(wifiLastResult);
+  result+=",\"dashboard_url\":"+jsonText(currentIp.length() ? "http://"+currentIp+"/" : String(""))+",\"home_url\":"+jsonText(homeLastIp.length() ? "http://"+homeLastIp+"/" : String("http://freenove-car.local/"));
+  result+=",\"wifi_signal_dbm\":"+String(!hotspotActive && homeLinkVerified ? String(WiFi.RSSI()) : String("null"))+",\"wifi_scan_state\":"+jsonText(wifiScanState);
+  result+=",\"matrix_head_auto\":"+String(matrixHeadAuto ? "true" : "false")+",\"matrix_head_target\":"+String(matrixHeadTarget)+",\"matrix_head_source\":"+jsonText(matrixHeadSource);
+  result+=",\"network_mode\":\""+String(hotspotActive ? "hotspot" : homeLinkVerified ? "home" : "connecting")+"\",\"hotspot_ssid\":\""+String(HOTSPOT_SSID)+"\",\"hotspot_ip\":\"192.168.4.1\",\"hotspot_clients\":"+String(hotspotActive ? WiFi.softAPgetStationNum() : 0);
+  result+=",\"ip\":\""; result+=hotspotActive ? WiFi.softAPIP().toString() : homeLinkVerified ? WiFi.localIP().toString() : String("");
   result+="\",\"line\":["+String(digitalRead(12))+","+String(digitalRead(11))+","+String(digitalRead(10))+"]";
   result+=",\"light\":["+String(lightAdc[0])+","+String(lightAdc[1])+"]";
   result+=",\"ir_count\":"+String(irCount)+",\"ir_raw\":"+String(lastIr)+controlStatus()+"}"; return result;
 }
 void status() {Serial.println(statusJson());}
 
-bool networkReady(){return hotspotActive || WiFi.status()==WL_CONNECTED;}
+bool networkReady(){return hotspotActive || homeLinkVerified;}
 void closeNetworkServer() {
   portalDns.stop();
   // Release old TCP contexts before changing interfaces. Retained FIN_WAIT
@@ -141,10 +178,24 @@ bool storeHomeSettings(const String &ssid,const String &password,bool pending=fa
     && file.write(reinterpret_cast<const uint8_t*>(password.c_str()),password.length())==password.length();
   file.close();
   if(!ok){LittleFS.remove("/wifi-home.tmp");return false;}
-  return LittleFS.rename("/wifi-home.tmp",pending ? "/wifi-pending" : "/wifi-home");
+  bool stored=LittleFS.rename("/wifi-home.tmp",pending ? "/wifi-pending" : "/wifi-home");
+  if(stored && !pending){LittleFS.remove("/wifi-forgotten");homeForgotten=false;}
+  return stored;
+}
+void storeWifiResult(const char *value){
+  wifiLastResult=value;if(!networkFilesystem)return;
+  File file=LittleFS.open("/wifi-result","w");if(file){file.print(value);file.close();}
+}
+void loadWifiMetadata(){
+  if(!networkFilesystem)return;
+  homeForgotten=LittleFS.exists("/wifi-forgotten");
+  if(homeForgotten){homeSsid="";homePassword="";}
+  File result=LittleFS.open("/wifi-result","r");if(result){String value=result.readString();result.close();if(value=="joined"||value=="failed"||value=="forgotten")wifiLastResult=value;}
+  File ip=LittleFS.open("/wifi-last-ip","r");if(ip){String value=ip.readString();ip.close();IPAddress parsed;if(value.length()<=15 && parsed.fromString(value))homeLastIp=value;}
 }
 void loadHomeSettings(bool pending=false){
   if(!networkFilesystem)return;
+  if(!pending && homeForgotten)return;
   File file=LittleFS.open(pending ? "/wifi-pending" : "/wifi-home","r");if(!file)return;
   uint8_t lengths[2];if(file.read(lengths,2)!=2 || lengths[0]>32 || lengths[1]>64 || file.size()!=2+lengths[0]+lengths[1]){file.close();return;}
   char ssid[33]={},key[65]={};
@@ -156,15 +207,18 @@ void loadHomeSettings(bool pending=false){
 }
 void startHotspot() {
   watchdog_enable(8000,true);
+  homeLinkVerified=false;homeAssociatedSsid="";
   fullStop();closeNetworkServer();WiFi.disconnect();WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(IPAddress(192,168,4,1),IPAddress(192,168,4,1),IPAddress(255,255,255,0));
   hotspotActive=(strlen(HOTSPOT_PASSWORD) ? WiFi.beginAP(HOTSPOT_SSID,HOTSPOT_PASSWORD) : WiFi.beginAP(HOTSPOT_SSID))==WL_CONNECTED;
-  if(hotspotActive){saveHotspotChoice(true);portalDns.setTTL(0);portalDns.start(53,"*",IPAddress(192,168,4,1));notice="Car Wi-Fi ready: open dashboard at http://192.168.4.1/; wheels stopped";}
+  if(hotspotActive){portalDns.setTTL(0);portalDns.start(53,"*",IPAddress(192,168,4,1));notice="Car Wi-Fi ready: open dashboard at http://192.168.4.1/; wheels stopped";}
   else {notice="Hotspot start failed; wheels stopped";homeDisconnectedAt=millis();}
   watchdog_enable(2000,true);
 }
 void startHomeWifi(bool offlineTest=false) {
+  if(!offlineTest && !wifiPairing && !homeSsid.length()){startHotspot();return;}
   watchdog_enable(8000,true);
+  homeLinkVerified=false;homeMatchSince=0;homeVerifyAt=millis()-250;homeAssociatedSsid="";
   fullStop();closeNetworkServer();
   if(hotspotActive)WiFi.disconnectAP();WiFi.disconnect();hotspotActive=false;
   saveHotspotChoice(false);WiFi.mode(WIFI_STA);
@@ -180,18 +234,48 @@ void queueNetwork(uint8_t choice){
   networkPending=choice;networkQueuedAt=millis();notice="Switching network; car stopped and disarmed";
 }
 void networkTick() {
+  if(wifiScanRunning){
+    int count=WiFi.scanComplete();
+    if(count>=0){
+      struct FoundNetwork{String ssid;int rssi;bool open;};FoundNetwork found[20];int used=0;
+      for(int i=0;i<count;i++){
+        const char *name=WiFi.SSID(i);if(!name)continue;char bounded[33]={};memcpy(bounded,name,strnlen(name,32));String ssid=bounded;
+        if(!ssid.length() || ssid==HOTSPOT_SSID)continue;
+        int rssi=WiFi.RSSI(i),same=-1;for(int j=0;j<used;j++)if(found[j].ssid==ssid)same=j;
+        if(same>=0){if(rssi>found[same].rssi)found[same]={ssid,rssi,WiFi.encryptionType(i)==ENC_TYPE_NONE};continue;}
+        if(used<20)found[used++]={ssid,rssi,WiFi.encryptionType(i)==ENC_TYPE_NONE};
+      }
+      for(int i=0;i<used;i++)for(int j=i+1;j<used;j++)if(found[j].rssi>found[i].rssi){FoundNetwork swap=found[i];found[i]=found[j];found[j]=swap;}
+      wifiScanResults="[";for(int i=0;i<used;i++){if(i)wifiScanResults+=",";wifiScanResults+="{\"ssid\":"+jsonText(found[i].ssid)+",\"rssi\":"+String(found[i].rssi)+",\"open\":"+String(found[i].open ? "true" : "false")+"}";}wifiScanResults+="]";
+      WiFi.scanDelete();wifiScanRunning=false;wifiScanState="ready";
+    }else if(uint32_t(millis()-wifiScanStarted)>12000){wifiScanRunning=false;wifiScanState="failed";}
+  }
   if(networkPending && uint32_t(millis()-networkQueuedAt)>=300) {
     uint8_t choice=networkPending;networkPending=0;
     fullStop();
     if(choice==4 && !storeHomeSettings(pendingSsid,pendingPassword,true)){wifiPairing=false;wifiJoinState="storage_error";notice="Wi-Fi settings could not be saved; network unchanged";return;}
     if(choice!=4)LittleFS.remove("/wifi-pending");
-    saveHotspotChoice(choice==2);
+    saveHotspotChoice(choice==2 || choice==5);
     if(choice==3){File file=LittleFS.open("/network-offline-test","w");if(file){file.print("1");file.close();}}
     else LittleFS.remove("/network-offline-test");
+    // A watchdog resets the CPU, while the radio can retain the old association.
+    // Disassociate before reboot so a candidate cannot inherit that old link/IP.
+    watchdog_enable(8000,true);closeNetworkServer();
+    if(hotspotActive)WiFi.disconnectAP();WiFi.disconnect();delay(150);
     watchdog_reboot(0,0,20);while(true)tight_loop_contents();
   }
+  // During the response grace period, the old link belongs to the old settings.
+  // Never confirm or save a newly queued candidate using that connection.
+  if(networkPending)return;
   if(hotspotActive){portalDns.processNextRequest();return;}
-  bool connected=WiFi.status()==WL_CONNECTED;
+  if(uint32_t(millis()-homeVerifyAt)>=250){
+    homeVerifyAt=millis();String actual=radioHomeSsid(),expected=wifiPairing ? pendingSsid : homeSsid;
+    if(actual.length() && actual==expected){
+      homeAssociatedSsid=actual;if(!homeMatchSince)homeMatchSince=millis();
+      homeLinkVerified=uint32_t(millis()-homeMatchSince)>=1000;
+    }else{homeLinkVerified=false;homeMatchSince=0;homeAssociatedSsid="";}
+  }
+  bool connected=homeLinkVerified;
   if(connected){
     bool justPaired=wifiPairing;
     if(wifiPairing){
@@ -199,15 +283,20 @@ void networkTick() {
       LittleFS.remove("/wifi-pending");
       homeSsid=pendingSsid;homePassword=pendingPassword;pendingSsid="";pendingPassword="";wifiPairing=false;
       homeSettingsSaved=saved;wifiJoinState=saved ? "joined" : "storage_error";
+      if(saved)storeWifiResult("joined");
       notice=saved ? "Home Wi-Fi joined and saved; dashboard at http://freenove-car.local/" : "Wi-Fi joined but settings could not be saved";
     }
-    if(!homeWasConnected && !justPaired)notice="Home Wi-Fi connected; dashboard ready";
+    if(!homeWasConnected){
+      homeLastIp=WiFi.localIP().toString();
+      if(networkFilesystem){File file=LittleFS.open("/wifi-last-ip","w");if(file){file.print(homeLastIp);file.close();}}
+      if(!justPaired)notice="Home Wi-Fi connected; dashboard ready at http://"+homeLastIp+"/";
+    }
     homeWasConnected=true;homeDisconnectedAt=millis();return;
   }
   if(homeWasConnected){homeWasConnected=false;homeDisconnectedAt=millis();fullStop();notice="Home Wi-Fi lost; car stopped";alert("wifi",3);}
   if(hotspotFallbackDue(false,false,millis(),homeDisconnectedAt)){
     bool failed=wifiPairing;wifiPairing=false;pendingSsid="";pendingPassword="";
-    if(failed)LittleFS.remove("/wifi-pending");
+    if(failed){LittleFS.remove("/wifi-pending");storeWifiResult("failed");}
     startHotspot();if(failed){wifiJoinState="failed";notice="Could not join that Wi-Fi. Car hotspot restored; previous saved network kept. Check name/password and retry.";}
   }
 }
@@ -216,7 +305,7 @@ String wifiJoinRequest(const String &body,const String &headers,int &code){
   auto fail=[&](int status,const char *message){code=status;return String("{\"error\":\"")+message+"\"}";};
   String who=headerOf(headers,"X-Car-Owner");
   if(headerOf(headers,"X-Car-Token")!=controlToken || who.length()<3 || who.length()>64)return fail(403,"Reload the dashboard before connecting Wi-Fi");
-  if(otaUntil || networkPending)return fail(409,"Finish the update or network switch first");
+  if(otaUntil || networkPending || wifiScanRunning)return fail(409,"Finish the scan, update or network switch first");
   if(armed && controller!=who)return fail(409,"Another controller is active; Stop first");
   if(!headerOf(headers,"Content-Type").startsWith("application/x-www-form-urlencoded"))return fail(415,"Use the dashboard Wi-Fi form");
   std::string encoded(body.c_str()),ssid,key,open;bool haveSsid=false,haveKey=false,haveOpen=false;
@@ -238,6 +327,26 @@ String wifiJoinRequest(const String &body,const String &headers,int &code){
   pendingSsid=ssid.c_str();pendingPassword=key.c_str();wifiPairing=true;wifiJoinState="connecting";queueNetwork(4);
   return "{\"ok\":true,\"stopped\":true,\"state\":\"connecting\",\"home_url\":\"http://freenove-car.local/\",\"fallback_seconds\":30}";
 }
+String wifiActionRequest(const String &action,const String &headers,int &code){
+  auto fail=[&](int status,const char *message){code=status;return String("{\"error\":\"")+message+"\"}";};
+  String who=headerOf(headers,"X-Car-Owner");
+  if(headerOf(headers,"X-Car-Token")!=controlToken || who.length()<3 || who.length()>64)return fail(403,"Reload the dashboard first");
+  if(otaUntil || networkPending || wifiScanRunning)return fail(409,"Finish the scan, update or network switch first");
+  if(armed && controller!=who)return fail(409,"Another controller is active; Stop first");
+  if(action=="scan"){
+    fullStop();wifiScanState="scanning";wifiScanResults="[]";wifiScanStarted=millis();
+    WiFi.scanDelete();int count=WiFi.scanNetworks(true);wifiScanRunning=count==-1;
+    if(!wifiScanRunning)wifiScanState=count==0 ? "ready" : "failed";
+    return "{\"ok\":true,\"stopped\":true,\"state\":"+jsonText(wifiScanState)+"}";
+  }
+  if(!networkFilesystem)return fail(503,"Wi-Fi settings storage unavailable");
+  // The tombstone prevents compiled credentials returning after a reboot or update.
+  fullStop();File marker=LittleFS.open("/wifi-forgotten","w");if(!marker)return fail(503,"Could not forget Wi-Fi; settings kept");
+  bool stored=marker.print("1")==1;marker.close();if(!stored){LittleFS.remove("/wifi-forgotten");return fail(503,"Could not forget Wi-Fi; settings kept");}
+  LittleFS.remove("/wifi-home");LittleFS.remove("/wifi-pending");LittleFS.remove("/wifi-last-ip");
+  homeForgotten=true;homeSettingsSaved=false;homeSsid="";homePassword="";homeLastIp="";storeWifiResult("forgotten");queueNetwork(5);
+  return "{\"ok\":true,\"stopped\":true,\"state\":\"forgotten\",\"dashboard_url\":\"http://192.168.4.1/\"}";
+}
 void finishHttp(HttpSlot &slot){
   String body;const char *type="application/json";int code=200;String extra;
   String &headers=slot.headers;
@@ -245,6 +354,9 @@ void finishHttp(HttpSlot &slot){
   else if(headers.startsWith("GET /api/status HTTP/"))body=statusJson();
   else if(headers.startsWith("POST /api/stop HTTP/")){fullStop();body="{\"stopped\":true}";}
   else if(headers.startsWith("POST /api/wifi HTTP/"))body=wifiJoinRequest(slot.body,headers,code);
+  else if(headers.startsWith("POST /api/wifi/scan HTTP/"))body=wifiActionRequest("scan",headers,code);
+  else if(headers.startsWith("POST /api/wifi/forget HTTP/"))body=wifiActionRequest("forget",headers,code);
+  else if(headers.startsWith("GET /api/wifi/scan HTTP/"))body="{\"state\":"+jsonText(wifiScanState)+",\"networks\":"+wifiScanResults+"}";
   else if(headers.startsWith("POST /api/control?")){int end=headers.indexOf(' ',5);body=controlRequest(headers.substring(5,end),headers,code);}
   else if(headers.startsWith("GET /favicon.ico ")){code=204;body="";}
   else if(hotspotActive && headers.startsWith("GET ") && !headers.startsWith("GET /api/")){
@@ -312,6 +424,7 @@ void serveLan() {
 }
 
 void handleCommand() {
+  if(wifiScanRunning && strcmp(command,"STATUS") && strcmp(command,"STOP")){Serial.println("ERR Wi-Fi scan running; movement disabled");return;}
   if(otaUntil && strcmp(command,"STATUS") && strcmp(command,"STOP")){Serial.println("ERR wireless update window open; movement disabled");return;}
   if(networkPending && strcmp(command,"STATUS") && strcmp(command,"STOP")){Serial.println("ERR network switching; movement disabled");return;}
   int a,b,c,d,angle; char extra;
@@ -353,7 +466,7 @@ void handleCommand() {
   } else if (!strcmp(command,"ARM")) {
     fullStop(); armed=true; runMode=USB_CONTROL; controller="USB"; lease(500); lastDrive=millis(); Serial.println("OK armed; DRIVE lease 500ms");
   } else if (sscanf(command,"SERVO %d %c",&angle,&extra)==1 && angle>=30 && angle<=150) {
-    fullStop();setHead(angle); Serial.println("OK servo");
+    fullStop();setHead(angle);if(matrixPresent)matrixHeadManualUntil=millis()+5000; Serial.println("OK servo");
   } else if (!strcmp(command,"BEEP")) {
     // GPIO2 shares a PWM slice with motor GPIO18/19: use software pulse instead.
     for(int i=0;i<100;i++) {digitalWrite(2,HIGH);delayMicroseconds(250);digitalWrite(2,LOW);delayMicroseconds(250);}
@@ -390,11 +503,14 @@ void setup() {
   delay(300); Wire.beginTransmission(0x71); matrixPresent=(Wire.endTransmission()==0);
   if(matrixPresent) {matrixCommand(0x21);matrixCommand(0x81);matrixCommand(0xe4);matrixTick(true);}
   else {Wire.end();pinMode(4,OUTPUT);digitalWrite(4,LOW);pinMode(5,INPUT);}
-  controlSetup();networkFilesystem=LittleFS.begin();loadHomeSettings();loadHomeSettings(true);
+  controlSetup();networkFilesystem=LittleFS.begin();loadWifiMetadata();loadHomeSettings();loadHomeSettings(true);
   bool offline=networkFilesystem && LittleFS.exists("/network-offline-test");if(offline)LittleFS.remove("/network-offline-test");
-  if(networkFilesystem && LittleFS.exists("/network-hotspot"))startHotspot();else startHomeWifi(offline);
+  bool requestedHotspot=networkFilesystem && LittleFS.exists("/network-hotspot");
+  // Consume explicit switches once; later power cycles retry the saved home network.
+  saveHotspotChoice(false);
+  if(hotspotOnBoot(requestedHotspot,wifiPairing,offline))startHotspot();else startHomeWifi(offline);
   ArduinoOTA.setHostname("freenove-rover");ArduinoOTA.setPort(2040);ArduinoOTA.setPassword(OTA_PASSWORD);
-  ArduinoOTA.onStart([](){fullStop();notice="Wireless firmware update: motors stopped";watchdog_update();});
+  ArduinoOTA.onStart([](){fullStop();saveHotspotChoice(hotspotActive);notice="Wireless firmware update: motors stopped";watchdog_update();});
   ArduinoOTA.onProgress([](unsigned int,unsigned int){watchdog_update();});
   ArduinoOTA.onEnd([](){fullStop();notice="Wireless update received; rebooting stopped";watchdog_update();});
   ArduinoOTA.onError([](ota_error_t){fullStop();otaUntil=0;notice="Wireless update failed; car stopped";watchdog_update();});
@@ -410,6 +526,7 @@ void loop() {
   sampleTelemetry();
   if(motorTestActive && (int32_t(millis()-motorTestDeadline)>=0 || !Serial)) stopMotors();
   controlTick();
+  matrixHeadTick();
   processRemote();
   serveLan();
   while(Serial.available()) {

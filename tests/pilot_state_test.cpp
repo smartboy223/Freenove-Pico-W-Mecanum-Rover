@@ -8,6 +8,7 @@
 #include "matrix_patterns_test.cpp"
 #include "network_policy_test.cpp"
 #include "wifi_settings_test.cpp"
+#include "head_effects_test.cpp"
 using std::min;using std::max;
 using String=std::string;
 // Hardware boundaries are substituted; Pilot.h is the production state machine.
@@ -75,6 +76,7 @@ void run(uint32_t duration){
 }
 int main(){
   wifi_test::runTests();
+  head_test::runTests();
   matrix_test::runTests();
   light_test::runTests();
   reset(MISSING);run(35000);

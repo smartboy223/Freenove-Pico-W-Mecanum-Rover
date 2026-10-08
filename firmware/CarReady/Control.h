@@ -74,6 +74,7 @@ bool buzzerCallback(repeating_timer_t*) {
 }
 void lease(uint32_t duration) {safetyDeadline=millis()+duration;safetyExpired=false;safetyActive=true;}
 void fullStop() {
+  matrixHeadManualUntil=0;
   safetyActive=false;safetyExpired=false;armed=false;runMode=IDLE;controller="";
   driveX=driveY=driveR=0;stopMotors();for(int &v:wheelOutput)v=0;
   beepUntil=0;gpio_put(2,0);chassisLeds.clear();chassisLeds.show();notice="Stopped and disarmed";
@@ -268,6 +269,7 @@ String controlRequest(const String &target,const String &headers,int &code) {
   String op=valueOf(target,"op");int x,y,r,s,angle;
   if(otaUntil && op!="ota")return fail(409,"Wireless update window open; close it before using controls");
   if(networkPending)return fail(409,"Network switch pending; car stopped");
+  if(wifiScanRunning)return fail(409,"Wi-Fi scan running; car stopped");
   if(op=="network") {
     String name=valueOf(target,"name");
     if(name!="home" && name!="hotspot")return fail(400,"Choose home or hotspot");
@@ -326,7 +328,13 @@ String controlRequest(const String &target,const String &headers,int &code) {
     matrixTick(true);
   }
   else if(op=="lineconfig"){int black;if(!parameterInt(valueOf(target,"black"),0,1,black))return fail(400,"Invalid line polarity");fullStop();lineBlack=black;notice="Line polarity updated; car stopped";}
-  else if(op=="servo") {if(!parameterInt(valueOf(target,"angle"),30,150,angle))return fail(400,"Invalid head angle");fullStop();setHead(angle);notice="Head repositioned; movement stopped";}
+  else if(op=="matrixhead"){
+    int enabled,left;
+    if(!matrixPresent)return fail(409,"Fit the LED matrix first");
+    if(!parameterInt(valueOf(target,"enabled"),0,1,enabled) || !parameterInt(valueOf(target,"left"),60,120,left) || (left!=60&&left!=120))return fail(400,"Invalid interactive head setting");
+    fullStop();matrixHeadAuto=enabled;scanLeftAngle=left;notice=enabled ? "Interactive matrix head enabled" : "Matrix head held manually";
+  }
+  else if(op=="servo") {if(!parameterInt(valueOf(target,"angle"),30,150,angle))return fail(400,"Invalid head angle");fullStop();setHead(angle);if(matrixPresent)matrixHeadManualUntil=millis()+5000;notice="Head repositioned; movement stopped";}
   else if(op=="beep")playTone(userTone,180);
   else if(op=="sound") {int volume,pitch;if(!parameterInt(valueOf(target,"volume"),0,100,volume)||!parameterInt(valueOf(target,"pitch"),400,3000,pitch))return fail(400,"Sound: volume 0..100, pitch 400..3000 Hz");buzzerVolume=volume;buzzerDuty=uint32_t(volume)*32768/100;userTone=pitch;}
   else if(op=="melody"){fullStop();melodyStarted=millis();melodyActive=true;notice="Six-note chime with display and RGB lights; wheels stopped";}
@@ -343,13 +351,13 @@ void processRemote() {
   if(raw)lastIr=raw;else if(repeat)raw=lastIr;
   irCount++;IrReceiver.resume();
   if(raw==0xEA15FF00 || raw==0xB54AFF00){fullStop();return;}
-  if(otaUntil || networkPending)return;
+  if(otaUntil || networkPending || wifiScanRunning)return;
   if(armed && controller!="IR")return;
   if(raw==0xBB44FF00){if(!repeat)playTone(userTone,80);return;}
   if(raw==0xBD42FF00){if(!repeat)ledStyle=ledStyle=="red" ? "green" : ledStyle=="green" ? "blue" : "red";return;}
   if(raw==0xAD52FF00){ledStyle="off";return;}
   if(raw==0xE916FF00 || raw==0xF30CFF00 || raw==0xF708FF00) {
-    fullStop();setHead(raw==0xF708FF00 ? 90 : constrain(headAngle+(raw==0xE916FF00 ? 10 : -10),30,150));return;
+    fullStop();setHead(raw==0xF708FF00 ? 90 : constrain(headAngle+(raw==0xE916FF00 ? 10 : -10),30,150));if(matrixPresent)matrixHeadManualUntil=millis()+5000;return;
   }
   RunMode selected=IDLE;int x=0,y=0,r=0;
   if(raw==0xBF40FF00){selected=REMOTE_MANUAL;y=25;}else if(raw==0xE619FF00){selected=REMOTE_MANUAL;y=-25;}

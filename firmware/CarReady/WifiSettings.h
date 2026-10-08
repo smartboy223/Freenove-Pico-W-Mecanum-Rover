@@ -3,6 +3,17 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+inline std::string wifiJsonString(const char *text){
+  std::string out="\"";
+  const char *hex="0123456789abcdef";
+  for(const unsigned char *p=reinterpret_cast<const unsigned char*>(text);*p;p++){
+    unsigned char c=*p;
+    if(c=='\"' || c=='\\'){out+='\\';out+=char(c);}
+    else if(c<32){out+="\\u00";out+=hex[c>>4];out+=hex[c&15];}
+    else out+=char(c);
+  }
+  return out+'\"';
+}
 inline bool wifiCredentialsValid(const char *ssid,size_t nameLength,const char *key,size_t keyLength){
   if(!nameLength || nameLength>32 || keyLength>64)return false;
   for(size_t i=0;i<nameLength;i++)if(uint8_t(ssid[i])<32 || uint8_t(ssid[i])==127)return false;
