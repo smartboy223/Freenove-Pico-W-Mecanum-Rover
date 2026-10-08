@@ -5,6 +5,9 @@
 #include <string>
 #include "roam_policy_test.cpp"
 #include "light_state_test.cpp"
+#include "matrix_patterns_test.cpp"
+#include "network_policy_test.cpp"
+#include "wifi_settings_test.cpp"
 using std::min;using std::max;
 using String=std::string;
 // Hardware boundaries are substituted; Pilot.h is the production state machine.
@@ -71,6 +74,8 @@ void run(uint32_t duration){
   }
 }
 int main(){
+  wifi_test::runTests();
+  matrix_test::runTests();
   light_test::runTests();
   reset(MISSING);run(35000);
   assert(!armed && turnStarts==8 && forwardTicks==0 && outputR==0 && radarClears==8);

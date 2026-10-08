@@ -56,6 +56,7 @@ uint32_t warningTimes[8]={};bool warningSeen[8]={};
 bool rangeGapActive=false;uint32_t rangeGapAt=0;
 uint32_t lastBatterySample=0;uint8_t lowBatterySamples=0;
 String ledStyle="auto";
+uint32_t effectStarted=0,expressionUntil=0,expressionRgb=0;
 volatile bool safetyActive=false,safetyExpired=false;
 volatile uint32_t safetyDeadline=0;
 repeating_timer_t safetyTimer,buzzerTimer;
@@ -77,6 +78,7 @@ void fullStop() {
   driveX=driveY=driveR=0;stopMotors();for(int &v:wheelOutput)v=0;
   beepUntil=0;gpio_put(2,0);chassisLeds.clear();chassisLeds.show();notice="Stopped and disarmed";
   autonomousRun=false;runDeadline=0;hardRunDeadline=0;partySound=false;ledStyle="auto";
+  expressionUntil=0;effectStarted=millis();lastPartyBeat=millis()-400;
   alertPulses=0;alertName="";lastWarning=millis()-1500;
   melodyActive=false;pilotAction="Stopped";pilotTurns=0;pilotDirection=0;pilotEscape=false;pilotSurvey=false;
   lineLastSeen=0;lineAction="Stopped";
@@ -161,7 +163,7 @@ bool guardedMotion(int x,int y,int rotation) {
 }
 void startRun(RunMode mode,const String &who,uint32_t duration) {
   fullStop();controller=who;runMode=mode;armed=true;modeStart=millis();
-  frontGuard=(mode!=SHOW);if(headAngle!=90)setHead(90);lease(duration);
+  frontGuard=(!matrixPresent && mode!=SHOW);if(headAngle!=90)setHead(90);lease(duration);
   if(mode==SHOW)ledStyle="auto";
   if(mode==LINE)lineLastSeen=millis();
   if(mode==PILOT){haltMotion();clearRadar();setHead(90);pilotStage=7;pilotTime=millis();pilotLeft=pilotRight=pilotCenter=-1;lastCruiseScan=millis();pilotAction="Checking forward path";pilotExploring=false;}
@@ -177,7 +179,12 @@ bool pilotForwardMoving(){return moving && wheelOutput[0]<0 && wheelOutput[1]<0 
 #include "Light.h"
 void effectsTick() {
   if(uint32_t(millis()-lastEffects)<50)return;lastEffects=millis();
-  if(alertPulses){chassisLeds.fill(chassisLeds.Color((millis()/100)%2 ? 255 : 15,0,0));}
+  uint32_t elapsed=millis()-effectStarted;
+  if(melodyActive && uint32_t(millis()-melodyStarted)>=1800)melodyActive=false;
+  if(alertPulses){chassisLeds.fill(chassisLeds.Color((millis()-alertStarted)%240<150 ? 255 : 15,0,0));}
+  else if(melodyActive){uint32_t t=millis()-melodyStarted;chassisLeds.fill(chassisLeds.ColorHSV(uint16_t((t/300)*10000),255,t%300<200 ? 255 : 30));}
+  else if(int32_t(millis()-expressionUntil)<0){chassisLeds.fill(expressionRgb);}
+  else if(ledStyle!="party" && buzzerVolume>0 && int32_t(millis()-beepUntil)<0){chassisLeds.fill(chassisLeds.Color(0,220,255));}
   else if(ledStyle=="off"){chassisLeds.clear();}
   else if(ledStyle=="red")chassisLeds.fill(chassisLeds.Color(255,0,0));
   else if(ledStyle=="green")chassisLeds.fill(chassisLeds.Color(0,255,0));
@@ -186,13 +193,13 @@ void effectsTick() {
   else if(ledStyle=="cyan")chassisLeds.fill(chassisLeds.Color(0,255,255));
   else if(ledStyle=="purple")chassisLeds.fill(chassisLeds.Color(180,0,255));
   else if(ledStyle=="white")chassisLeds.fill(chassisLeds.Color(255,255,255));
-  else if(ledStyle=="chase"){chassisLeds.clear();chassisLeds.setPixelColor((millis()/100)%8,chassisLeds.Color(0,255,160));}
-  else if(ledStyle=="breathe"){int level=abs(255-int((millis()/8)%510));chassisLeds.fill(chassisLeds.Color(0,level/2,level));}
-  else if(ledStyle=="rainbow" || ledStyle=="party" || runMode==SHOW){for(int i=0;i<8;i++)chassisLeds.setPixelColor(i,chassisLeds.ColorHSV(uint16_t(millis()*(ledStyle=="party" ? 65 : 25)+i*8000)));}
+  else if(ledStyle=="chase"){chassisLeds.clear();chassisLeds.setPixelColor((elapsed/100)%8,chassisLeds.Color(0,255,160));}
+  else if(ledStyle=="breathe"){int level=breatheLevel(elapsed);chassisLeds.fill(chassisLeds.Color(0,level/2,level));}
+  else if(ledStyle=="rainbow" || ledStyle=="party" || runMode==SHOW){for(int i=0;i<8;i++)chassisLeds.setPixelColor(i,chassisLeds.ColorHSV(uint16_t(elapsed*(ledStyle=="party" ? 65 : 25)+i*8000),255,ledStyle!="party" || elapsed%400<150 ? 255 : 100));}
   else if(moving)chassisLeds.fill(chassisLeds.Color(runMode==MANUAL || runMode==REMOTE_MANUAL ? 0 : 20,runMode==MANUAL || runMode==REMOTE_MANUAL ? 60 : 200,runMode==MANUAL || runMode==REMOTE_MANUAL ? 255 : 40));
   else if(armed)chassisLeds.fill(chassisLeds.Color(100,55,0));else chassisLeds.clear();
   chassisLeds.show();
-  if(ledStyle=="party" && partySound && !alertPulses && uint32_t(millis()-lastPartyBeat)>=400){lastPartyBeat=millis();static const int notes[]={523,659,784,1047,784,659,587,784};playTone(notes[(millis()/400)%8],(millis()/400)%4==0 ? 140 : 70);}
+  if(ledStyle=="party" && partySound && !alertPulses && elapsed/400!=(lastPartyBeat-effectStarted)/400){lastPartyBeat=millis();playTone(partyPitch(elapsed),partyBeat(elapsed)%4==0 ? 140 : 100);}
   if(melodyActive && !alertPulses){uint32_t t=millis()-melodyStarted;static const int notes[]={523,659,784,1047,784,659};if(t>=1800)melodyActive=false;else if(t%300<200)playTone(notes[t/300],25);}
 }
 void expireControl() {
@@ -259,9 +266,24 @@ String controlRequest(const String &target,const String &headers,int &code) {
   if(token!=controlToken || who.length()<3 || who.length()>64)return fail(403,"Control token missing; reload the page");
   if(armed && controller!=who)return fail(409,"Another controller is active; Stop first");
   String op=valueOf(target,"op");int x,y,r,s,angle;
+  if(otaUntil && op!="ota")return fail(409,"Wireless update window open; close it before using controls");
+  if(networkPending)return fail(409,"Network switch pending; car stopped");
+  if(op=="network") {
+    String name=valueOf(target,"name");
+    if(name!="home" && name!="hotspot")return fail(400,"Choose home or hotspot");
+    queueNetwork(name=="hotspot" ? 2 : 1);return "{\"ok\":true,\"stopped\":true}";
+  }
+  if(op=="ota") {
+    if(!parameterInt(valueOf(target,"value"),0,1,s))return fail(400,"Invalid update window setting");
+    fullStop();
+    if(s){if(!networkReady())return fail(503,"Connect Wi-Fi before updating");otaUntil=millis()+120000;watchdog_enable(8000,true);if(!otaListening){ArduinoOTA.begin(false);otaListening=true;}notice="Wireless update window: car stopped for 2 minutes";}
+    else {otaUntil=0;notice="Wireless update window closed; car stopped";}
+    return "{\"ok\":true}";
+  }
   if(op=="arm") {
     if(!parameterInt(valueOf(target,"guard"),0,1,s))return fail(400,"Invalid guard setting");
-    startRun(MANUAL,who,750);frontGuard=s;notice="Manual armed; hold a direction to move";
+    startRun(MANUAL,who,750);frontGuard=!matrixPresent && s;
+    notice=matrixPresent ? "Matrix manual driving: no obstacle sensing" : "Manual armed; hold a direction to move";
   }else if(op=="drive") {
     if(!armed || runMode!=MANUAL)return fail(409,"Arm manual controls first");
     if(!parameterInt(valueOf(target,"x"),-1,1,x)||!parameterInt(valueOf(target,"y"),-1,1,y)||!parameterInt(valueOf(target,"r"),-1,1,r)||!parameterInt(valueOf(target,"speed"),15,40,s)){fullStop();return fail(400,"Invalid movement");}
@@ -292,13 +314,24 @@ String controlRequest(const String &target,const String &headers,int &code) {
     startRun(requested,who,1000);speedLimit=s;
     if(requested==PILOT || requested==LIGHT){runDeadline=millis()+uint32_t(seconds)*1000;hardRunDeadline=runDeadline;autonomousRun=detached;}
   }else if(op=="calibrate")calibrateLight();
+  else if(op=="matrix") {
+    if(!matrixPresent)return fail(409,"Fit the LED matrix and reboot first");
+    MatrixFace face=matrixFace;int brightness=matrixBrightness,rotation=matrixRotation;
+    if(!parseMatrixFace(valueOf(target,"face").c_str(),face))return fail(400,"Unknown matrix expression");
+    if(valueOf(target,"brightness").length() && !parameterInt(valueOf(target,"brightness"),1,15,brightness))return fail(400,"Matrix brightness must be 1 to 15");
+    if(valueOf(target,"rotation").length() && (!parameterInt(valueOf(target,"rotation"),0,270,rotation) || rotation%90))return fail(400,"Matrix alignment must be 0, 90, 180 or 270 degrees");
+    bool changed=matrixFace!=face;matrixFace=face;matrixBrightness=brightness;matrixRotation=rotation;
+    if(changed){if(int32_t(millis()-expressionUntil)<0){beepUntil=0;gpio_put(2,0);}expressionUntil=0;}
+    if(changed && face>=MatrixFace::EYES && face<=MatrixFace::COOL){expressionUntil=millis()+600;expressionRgb=expressionColor(face);if(soundAlerts)playTone(expressionPitch(face),100);}
+    matrixTick(true);
+  }
   else if(op=="lineconfig"){int black;if(!parameterInt(valueOf(target,"black"),0,1,black))return fail(400,"Invalid line polarity");fullStop();lineBlack=black;notice="Line polarity updated; car stopped";}
   else if(op=="servo") {if(!parameterInt(valueOf(target,"angle"),30,150,angle))return fail(400,"Invalid head angle");fullStop();setHead(angle);notice="Head repositioned; movement stopped";}
   else if(op=="beep")playTone(userTone,180);
   else if(op=="sound") {int volume,pitch;if(!parameterInt(valueOf(target,"volume"),0,100,volume)||!parameterInt(valueOf(target,"pitch"),400,3000,pitch))return fail(400,"Sound: volume 0..100, pitch 400..3000 Hz");buzzerVolume=volume;buzzerDuty=uint32_t(volume)*32768/100;userTone=pitch;}
-  else if(op=="melody"){fullStop();melodyStarted=millis();melodyActive=true;notice="Playing six-note chime; car remains stopped";}
-  else if(op=="led") {String color=valueOf(target,"color");if(color!="auto" && color!="off" && color!="red" && color!="green" && color!="blue" && color!="yellow" && color!="cyan" && color!="purple" && color!="white" && color!="rainbow" && color!="chase" && color!="breathe" && color!="party")return fail(400,"Invalid light effect");ledStyle=color;effectsTick();}
-  else if(op=="party"){int sound=0;if(!parameterInt(valueOf(target,"sound"),0,1,sound))return fail(400,"Invalid party sound setting");fullStop();ledStyle="party";partySound=sound;notice="Stationary party lights; Stop ends the party";}
+  else if(op=="melody"){fullStop();melodyStarted=millis();melodyActive=true;notice="Six-note chime with display and RGB lights; wheels stopped";}
+  else if(op=="led") {String color=valueOf(target,"color");if(color!="auto" && color!="off" && color!="red" && color!="green" && color!="blue" && color!="yellow" && color!="cyan" && color!="purple" && color!="white" && color!="rainbow" && color!="chase" && color!="breathe" && color!="party")return fail(400,"Invalid light effect");ledStyle=color;effectStarted=millis();lastPartyBeat=effectStarted-400;partySound=false;effectsTick();}
+  else if(op=="party"){int sound=0;if(!parameterInt(valueOf(target,"sound"),0,1,sound))return fail(400,"Invalid party sound setting");fullStop();ledStyle="party";partySound=sound;notice="Stationary party: display, RGB lights and optional music; Stop ends it";}
   else if(op=="brightness"){if(!parameterInt(valueOf(target,"value"),5,50,s))return fail(400,"Brightness must be 5 to 50 percent");ledBrightness=s;chassisLeds.setBrightness(s*255/100);}
   else if(op=="alerts"){if(!parameterInt(valueOf(target,"value"),0,1,s))return fail(400,"Invalid alert setting");soundAlerts=s;if(!s){beepUntil=0;gpio_put(2,0);}}
   else return fail(400,"Unknown operation");
@@ -310,6 +343,7 @@ void processRemote() {
   if(raw)lastIr=raw;else if(repeat)raw=lastIr;
   irCount++;IrReceiver.resume();
   if(raw==0xEA15FF00 || raw==0xB54AFF00){fullStop();return;}
+  if(otaUntil || networkPending)return;
   if(armed && controller!="IR")return;
   if(raw==0xBB44FF00){if(!repeat)playTone(userTone,80);return;}
   if(raw==0xBD42FF00){if(!repeat)ledStyle=ledStyle=="red" ? "green" : ledStyle=="green" ? "blue" : "red";return;}
@@ -349,9 +383,18 @@ String controlStatus() {
   extra+=",\"line_black\":"+String(lineBlack)+",\"line_action\":\""+lineAction+"\",\"radar\":[";
   for(int i=0;i<9;i++){if(i)extra+=",";uint32_t age=millis()-radarTime[i];extra+="["+String(30+i*15)+","+(radarTime[i] && age<6000 && radarDistance[i]>=0 ? String(radarDistance[i],1) : String("null"))+","+String(age)+"]";}extra+="]";
   extra+=",\"sound_volume\":"+String(buzzerVolume)+",\"tone_hz\":"+String(userTone)+",\"playing_melody\":"+String(melodyActive ? "true" : "false");
+  extra+=",\"buzzer_active\":"+String(buzzerVolume>0 && int32_t(millis()-beepUntil)<0 ? "true" : "false")+",\"buzzer_hz\":"+String(buzzerFrequency)+",\"party_sound\":"+String(partySound ? "true" : "false")+",\"effect_elapsed_ms\":"+String(millis()-effectStarted);
+  extra+=",\"matrix_source\":\""+String(matrixSource)+"\",\"matrix_output_brightness\":"+String(matrixOutputBrightness)+",\"matrix_writes\":"+String(matrixWrites)+",\"matrix_errors\":"+String(matrixErrors)+",\"rgb_pixels\":[";
+  for(int i=0;i<8;i++){if(i)extra+=",";extra+=String(chassisLeds.getPixelColor(i));}extra+="]";
+  extra+=",\"matrix_face\":\""+String(matrixFaceName(matrixFace))+"\",\"matrix_active\":\""+String(matrixFaceName(matrixActive))+"\",\"matrix_brightness\":"+String(matrixBrightness)+",\"matrix_rows\":[";
+  for(int row=0;row<8;row++){if(row)extra+=",";extra+=String(matrixRows[row]);}extra+="]";
+  extra+=",\"matrix_rotation\":"+String(matrixRotation)+",\"matrix_wire\":[";
+  for(int row=0;row<8;row++){if(row)extra+=",";extra+=String(matrixWire[row]);}extra+="]";
+  extra+=",\"ota_supported\":true,\"ota_window_s\":"+String(otaUntil ? max(0,int32_t(otaUntil-millis()+999)/1000) : 0)+",\"uptime_ms\":"+String(millis());
   return extra;
 }
 void controlSetup() {
+  frontGuard=!matrixPresent;
   char token[24];snprintf(token,sizeof(token),"%08lx%08lx",(unsigned long)get_rand_32(),(unsigned long)get_rand_32());controlToken=token;
   add_repeating_timer_ms(-10,safetyCallback,nullptr,&safetyTimer);
   buzzerDuty=uint32_t(buzzerVolume)*32768/100;

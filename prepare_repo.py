@@ -7,11 +7,11 @@ from pathlib import Path
 root=Path(__file__).resolve().parent
 destination=root/'repo-export'
 files=['README.md','REMOTE-GUIDE.md','THIRD-PARTY.md','.gitignore','requirements.txt',
-       'wifi-config.example.json','build.ps1','test.ps1','flash.ps1','Flash-Car.bat',
+       'wifi-config.example.json','hotspot-config.example.json','build.ps1','test.ps1','flash.ps1','Flash-Car.bat',
        'Check-Car.bat','Check-Ultrasonic.bat','prepare_wifi.py','prepare_dashboard.py',
        'prepare_repo.py','car_tool.py','control_check.py','studio_check.py','lan_check.py',
        'http_recovery_check.py','blocked_recovery_check.py','recovery_check.py','hardware_check.py','sensor_check.py',
-       'sensor_session.py','light_follow_check.py','obstacle_check.py','docs/VALIDATION.md']
+       'sensor_session.py','matrix_effects_check.py','wifi_setup_check.py','matrix_check.py','wireless_update.py','hotspot_check.py','light_follow_check.py','obstacle_check.py','docs/VALIDATION.md']
 selected={Path(name) for name in files}
 for directory in ['firmware/CarReady','tests','project-libraries']:
     for path in (root/directory).rglob('*'):
@@ -30,6 +30,14 @@ if config.exists():
         value=settings.get(key)
         if isinstance(value,str) and value:
             secrets.extend([value.encode('utf-8'),json.dumps(value,ensure_ascii=False)[1:-1].encode('utf-8')])
+ota_config=root/'ota-config.json'
+if ota_config.exists():
+    value=json.loads(ota_config.read_text(encoding='utf-8-sig')).get('password')
+    if isinstance(value,str) and value:secrets.append(value.encode('utf-8'))
+hotspot_config=root/'hotspot-config.json'
+if hotspot_config.exists():
+    value=json.loads(hotspot_config.read_text(encoding='utf-8-sig')).get('password')
+    if isinstance(value,str) and value:secrets.append(value.encode('utf-8'))
 payload={path:(root/path).read_bytes() for path in sorted(selected)}
 for path,data in payload.items():
     if any(secret in data for secret in secrets):raise SystemExit(f'Export blocked: local Wi-Fi value found in {path}.')

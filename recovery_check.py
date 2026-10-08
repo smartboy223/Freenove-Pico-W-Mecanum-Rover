@@ -25,7 +25,7 @@ samples=[]
 report={'test':'lifted echo-dropout heading recovery','sensor_fault_injection':True,'passed':False}
 try:
     request('/api/stop',True)
-    initial=status();assert initial['firmware']=='CarReady-2.6'
+    initial=status();assert initial['firmware']=='CarReady-2.11'
     assert not initial['armed'] and not initial['moving']
     report['initial']=initial
     assert initial['front_cm'] is not None and initial['front_cm']>=55, 'Recovery needs a reliable clear front (55 cm minimum); move nearby objects away before testing.'

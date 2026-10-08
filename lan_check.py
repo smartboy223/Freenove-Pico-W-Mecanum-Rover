@@ -1,11 +1,14 @@
 """Exercise the Pico HTTP server with desktop and mobile-style requests."""
+import argparse
 import concurrent.futures
 import json
 import socket
 import time
 from pathlib import Path
 
-HOST='192.168.0.202'
+parser=argparse.ArgumentParser()
+parser.add_argument('--host',default='192.168.0.202')
+HOST=parser.parse_args().host
 def check(name, delay=0, large=False):
     try:
         with socket.create_connection((HOST,80),timeout=5) as connection:

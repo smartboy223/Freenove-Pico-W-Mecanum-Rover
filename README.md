@@ -1,10 +1,10 @@
 # 🤖 Freenove Pico W Mecanum Rover
 
-CarReady **2.6** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, RGB effects and sound alerts. The dashboard runs on the Pico W itself; the PC is needed for setup and flashing only.
+CarReady **2.11** turns the Freenove FNK0089 mecanum car into a Wi-Fi rover with a phone dashboard, physical remote control, sensor-assisted driving, animated matrix expressions, RGB effects and sound alerts. The dashboard runs on the Pico W itself; after the first USB installation, firmware updates can also use home Wi-Fi or the car's own open development hotspot.
 
 **📱 Control from your phone · 🛞 Move in any direction · 📡 Scan obstacles · 🌈 Lights & sound**
 
-![Live Pico W dashboard showing obstacle roaming and radar](docs/images/dashboard-2.6.jpg)
+![Live Pico W 2.9 dashboard with circular mecanum driving controls](docs/images/dashboard-drive-2.9.png)
 
 *Real dashboard screenshot from the tested car. The IP address and sensor readings shown are examples; yours will differ.*
 
@@ -19,6 +19,10 @@ New to Pico projects? Follow the [Windows setup below](#easy-setup), then try [y
 ## ✨ Features
 
 - Mecanum manual driving: forward, reverse, crab walks, diagonals and rotation.
+- Phone-friendly circular driving pad: hold to move, slide between directions, release to stop; dedicated crab and turn controls.
+- LED matrix expressions: happy, heart, angry, sad, wink, surprised, sleepy, cool, party and blinking eyes, plus interactive movement arrows and adjustable brightness.
+- Password-protected Wi-Fi firmware updates during a short, stopped maintenance window.
+- Protected car hotspot at **192.168.4.1** when home Wi-Fi is unavailable, with dashboard controls for switching networks.
 - Timed obstacle roaming with a servo-mounted ultrasonic sensor, five-angle scans, retained-direction turns and short recent-path retreats.
 - Live radar with distance labels, approximate echo sectors and selectable 100/150/300 cm range.
 - Black-line following and independently timed flashlight following, with left/right steering, straight travel and a calibrated room baseline.
@@ -54,7 +58,7 @@ Freenove **FNK0089**, **Raspberry Pi Pico W**, mecanum roller wheels and the kit
 
 </details>
 
-The ultrasonic module and matrix share the front connector and cannot operate there together. Automatic driving requires the ultrasonic module.
+The ultrasonic module and matrix share the front connector and cannot operate there together. Manual driving works with either module. With the matrix fitted, the obstacle guard is unavailable and is disabled automatically; the dashboard labels this explicitly. Guarded automatic driving requires the ultrasonic module.
 
 <a id="easy-setup"></a>
 
@@ -67,8 +71,8 @@ The steps below use **PowerShell**. Copy one command block at a time. Tested wit
 If Git is installed:
 
 ```powershell
-git clone https://github.com/smartboy223/Freenove-4WD-Mecanum-rover.git
-Set-Location Freenove-4WD-Mecanum-rover
+git clone https://github.com/smartboy223/Freenove-Pico-W-Mecanum-Rover.git
+Set-Location Freenove-Pico-W-Mecanum-Rover
 ```
 
 **Without Git:** select **Code → Download ZIP** on GitHub, extract it, open the extracted project folder and choose **Open in Terminal**. You should see `README.md`, `build.ps1` and `wifi-config.example.json` in that folder.
@@ -152,7 +156,7 @@ arduino-cli board list
 Find the Pico's port, then upload. **Replace `COM3` with your own port:**
 
 ```powershell
-arduino-cli upload --fqbn rp2040:rp2040:rpipicow --port COM3 --input-dir build
+arduino-cli upload --fqbn rp2040:rp2040:rpipicow:flash=2097152_1048576 --port COM3 --input-dir build
 ```
 
 ### 7️⃣ Find your dashboard address
@@ -173,13 +177,30 @@ If USB lists more than one Pico, select the port explicitly, for example `python
 
 ### 🎮 Your first drive
 
-1. Open **Drive** and leave the front obstacle guard checked.
-2. Select a low speed, then press **Arm manual controls**.
-3. Hold one direction briefly. Release it—the wheels should stop.
+1. Open **Drive**. With the ultrasonic module, leave the front obstacle guard checked. With the matrix, the dashboard automatically disables the unavailable guard.
+2. Open **⚙ Driving settings**, select a low speed, then press **Arm manual controls**.
+3. Hold one direction briefly. Slide to another arrow to change direction; release or leave the pad to stop.
 4. Check forward, reverse, crab left/right and rotation while the wheels remain lifted.
 5. Press **STOP & DISARM** before placing the car on a clear, level floor.
 
-The Pico hosts the dashboard. After setup, it can run on its battery without the PC; the phone still needs access to the same Wi-Fi network.
+The Pico hosts the dashboard. After setup, it can run on its battery without the PC; connect your phone through home Wi-Fi or directly to the car hotspot.
+
+### 📶 Later firmware updates over Wi-Fi
+
+Install **2.8 or later by USB once** using the steps above. `build.ps1` allocates 1 MiB to the sketch and 1 MiB to the filesystem so a wireless update can be staged. It also creates a random update password in local **`ota-config.json`**. Keep that file together with your existing `wifi-config.json`; both stay outside Git.
+
+For future updates, power the car, keep it stopped, and connect the PC to the same LAN:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+python wireless_update.py --host 192.168.0.202
+```
+
+If the PC is connected directly to the car's hotspot, use `python wireless_update.py --host 192.168.4.1` instead. Edit the source and build on the PC, then upload over either connection. The dashboard is a controller, not a browser code editor. No internet connection is needed to use the local dashboard or upload a build once the tools are installed.
+
+Replace the address with your car's current IP. The updater stops/disarms the wheels, opens a two-minute maintenance window, blocks driving, authenticates, transfers the local **`.bin`**, and confirms a stopped reboot. The listener closes afterwards. If Windows blocks the transfer, allow Python on your **private** network; the transfer uses Pico UDP 2040 and PC TCP 32382. USB/BOOTSEL remains available for recovery.
+
+Do not delete or replace `ota-config.json` before an update: its password must match the one already installed. A deliberate password change needs one USB installation. The locally built `.bin` and `.uf2` contain your private settings and should stay unpublished. This follows the [Arduino-Pico wireless update support](https://arduino-pico.readthedocs.io/en/latest/ota.html).
 
 ## 📱 Connect from your phone
 
@@ -187,9 +208,31 @@ Run `python car_tool.py STATUS` to find the Pico's current `ip`. On a phone conn
 
 The Pico serves the dashboard directly on port 80. DHCP may change its address; a router reservation keeps it stable. `http://freenove-car.local/` is also advertised, where the phone/router supports local name resolution. Guest-network or mesh client isolation can block phone access even when the PC can reach the car. This dashboard is intended for the local network.
 
+### 🚙 Direct car Wi-Fi: no router required
+
+Firmware **2.11** provides an open development network named **Freenove-Rover**. No Wi-Fi password is needed. If the saved home network cannot connect, this hotspot starts after **30 seconds**. Choosing **Use car hotspot** starts it directly, and that choice survives reboots and firmware updates.
+
+1. In **Connection options**, choose **Use car hotspot**, or use `python car_tool.py WIFI HOTSPOT` from USB.
+2. On your phone, join **Freenove-Rover** without a password. Stay connected when the phone says there is no internet.
+3. Tap the phone's **Sign in to network** notification, or open **[http://192.168.4.1/](http://192.168.4.1/)** directly. Local DNS and the common Android, Apple and Windows connection probes lead to the dashboard, following [Arduino-Pico's captive portal approach](https://github.com/earlephilhower/arduino-pico/blob/master/libraries/DNSServer/examples/CaptivePortal/CaptivePortal.ino). Automatic opening depends on the phone; the direct address always remains available on this Wi-Fi.
+
+### 🏠 Pair with home Wi-Fi from the dashboard
+
+Tap the connection badge at the top to jump to **Connection options**. The panel opens automatically on the car hotspot. Enter the **2.4 GHz Wi-Fi name and password**, then choose **Save & join home Wi-Fi**. A separate checkbox supports an open home/classroom network.
+
+The car stops and performs a short controlled restart before switching. After joining, connect your phone to that same home network and open **[http://freenove-car.local/](http://freenove-car.local/)** or the Pico's LAN IP. This installation uses `192.168.0.202`; another router can assign a different address. `python car_tool.py STATUS` can show the current IP over USB.
+
+Successful credentials are saved in the Pico's LittleFS storage and survive reboots and wireless updates. The password travels in a POST body, is cleared from the form after acceptance, and is never returned in status readings. If joining fails, reconnect to **Freenove-Rover** after about 30 seconds; the previous saved network is retained. **Retry saved home Wi-Fi** reconnects without re-entering credentials.
+
+Home Wi-Fi and the car hotspot are alternative modes in this firmware. USB recovery commands remain `python car_tool.py WIFI HOTSPOT` and `python car_tool.py WIFI HOME`. Wireless code updates still use the separate local `ota-config.json` password and stopped maintenance window; opening the Wi-Fi does not change that update mechanism.
+
+The hotspot name is configured in `hotspot-config.json`; an empty `password` creates the open network. A password of 8–63 ASCII characters can still be set for a protected hotspot. Saved dashboard credentials take precedence over the home defaults compiled from `wifi-config.json`; update them through the form when moving to another router.
+
+![Live open car Wi-Fi and home-network setup](docs/images/dashboard-wifi-2.11.png)
+
 ## 🛞 Driving modes
 
-In **Drive**, select a low speed, keep **Front obstacle guard** enabled and arm manual controls. Hold a direction to move; release to stop. Crab arrows move sideways, corners move diagonally and curved arrows rotate. **STOP & DISARM** cancels every mode. The configured forward/backward correction preserves left/right crab and rotation; verify wheel direction while lifted after changing hardware.
+In **Drive**, use **⚙ Driving settings** to select a low speed, keep **Front obstacle guard** enabled when ultrasonic is fitted, and arm manual controls. Hold a direction to move; release to stop. Slide across the circular pad to change direction. Crab arrows move sideways, corners move diagonally and curved arrows rotate. Moving onto the center or outside the pad stops the wheels; changing tabs or leaving the page also ends manual movement. **STOP & DISARM** cancels every mode. The configured forward/backward correction preserves left/right crab and rotation; verify wheel direction while lifted after changing hardware.
 
 The front guard stops forward movement below **35 cm**, with uncertain echoes, or with the head off-center. One suspicious short echo brakes immediately; two consistent close echoes confirm an obstacle warning. Sideways, reverse and rotation are not covered by the front sensor.
 
@@ -231,9 +274,17 @@ Keep the dashboard visible for line mode and flashlight mode with independent ru
 
 **Lights & sound** offers RGB colors, effects, brightness, party mode, test tones from 400–3000 Hz and a six-note chime. Loudness controls GPIO duty cycle; it is approximate rather than amplifier volume. Zero mutes all sound. Movement alerts can be toggled separately. Stationary party and melody commands stop driving first.
 
+With the **LED matrix fitted**, the same panel includes an expression gallery and a live 16×8 artwork preview. Choose Happy, Heart, Angry, Sad, Wink, Surprised, Sleepy, Cool, blinking Eyes, animated Party, or a direction sign. **Interactive** follows movement, warnings and every RGB effect: colors choose matching faces, running lights sweep across both matrix panels, breathing lights pulse a heart, and rainbow cycles expressions. Warning faces flash in time with the warning lights and buzzer. Brightness ranges from 1–15. Choosing an emotion gives a brief matching RGB flash and tone when sound alerts are enabled; zero volume mutes it. Brightness/alignment changes do not replay the tone. Normal expression changes keep your drive command, and your selection stays after Stop; reboot restores Interactive. The gallery **Party** button is a stationary-party shortcut and stops driving first.
+
+**Display alignment** defaults to **90° left**, correcting the kit's two 8×8 panels individually while keeping every pixel and the left/right panel order. The two halves then form the intended 16×8 face or sign. Original, 90° right and 180° alignments are also available for other mounting/wiring arrangements. The preview shows the intended artwork before this hardware correction. A reboot restores the kit default.
+
+**Start stationary party** synchronizes dancing expressions, pulsing rainbow LEDs and an optional eight-note rhythm on a shared 400 ms beat. It temporarily animates even a manually selected face, then **Stop & disarm** silences the buzzer, clears the chassis lights and restores your chosen face. **Matrix Off** stays dark. Uncheck the party rhythm for a silent light show; volume zero also mutes music without pausing the animations. The six-note chime shows animated sound bars with RGB note colors, and a test tone briefly lights the display and chassis.
+
+![Live coordinated matrix, lights and party controls](docs/images/dashboard-party-2.10.png)
+
 The ten-second crab/spin demonstration requires acknowledgement that all four wheels are lifted. It finishes stopped and disarmed.
 
-To swap the front module: switch the car off, unplug USB, fit the ultrasonic sensor or matrix in the vendor orientation, then restore power. A response at I2C address 0x71 selects matrix mode; otherwise ultrasonic mode is selected. Check the dashboard or `Check-Car.bat`. An absent module can also select ultrasonic mode, so selection alone does not prove successful ranging.
+To swap the front module: switch the car off, unplug USB, fit the ultrasonic sensor or matrix in the vendor orientation, then restore power. A response at I2C address 0x71 selects matrix mode; otherwise ultrasonic mode is selected. Check the dashboard or `Check-Car.bat`. With the matrix fitted, Arm manual controls supports forward, reverse, crab walks and turns without distance sensing. Line following, flashlight following and obstacle roaming still require the ultrasonic module. Reboot after each module swap so the fitted module is detected. An absent module can also select ultrasonic mode, so selection alone does not prove successful ranging.
 
 ## 🧪 Checks and diagnostics
 
@@ -242,16 +293,22 @@ To swap the front module: switch the car off, unplug USB, fit the ultrasonic sen
 | `python car_tool.py STATUS` | USB sensor/controller status |
 | `python car_tool.py STOP` | Stop/disarm |
 | `python car_tool.py --verify` | USB checks without wheel motion |
-| `./test.ps1` | Actual roaming state machine and policy tests on the PC |
+| `./test.ps1` | Production roaming/light policies and matrix graphics/direction tests on the PC |
+| `python tests/mobile_dashboard_test.py` | Touch/keyboard driving regression against a local browser fixture; requires optional Playwright |
+| `python wireless_update.py --host <car-ip>` | Protected Wi-Fi firmware update with stopped reboot verification |
+| `python hotspot_check.py` | Windows stopped-car check of automatic fallback, direct dashboard/OTA and home recovery; uses a disconnected Wi-Fi adapter and USB |
 | `python control_check.py --host <car-ip> --lifted` | Live LAN controls, wheel patterns, timed roaming and show |
 | `python studio_check.py` | Stopped-car sound/head checks |
 | `python lan_check.py` | HTTP compatibility checks |
 | `python http_recovery_check.py` | Stopped-car HTTP stress and intentional watchdog restart |
 | `python recovery_check.py --lifted` | Live fault-injection test: two turns with echoes suppressed, then restore the real sensor |
+| `python wifi_setup_check.py --leave-hotspot` | Windows stopped-car open Wi-Fi, captive-page, home pairing, rollback and saved-settings/OTA checks; requires USB and Playwright |
+| `python matrix_effects_check.py --host 192.168.0.202` | Stopped-car matrix, RGB, chime, party, mute and I2C acknowledgement checks |
+| `python matrix_check.py --lifted` | Matrix-mode manual patterns, guard selection, lease expiry and automatic-mode rejection |
 | `python light_follow_check.py --lifted` | 32-second real flashlight sequence: left, right, both, then off; no heartbeats |
 | `python blocked_recovery_check.py --lifted` | Real forward travel, simulated wall, bounded retreat, then real ranging and resumed travel |
 
-Live tests write local JSON evidence, excluded from the repository. Scripts other than `control_check.py`, `recovery_check.py`, `blocked_recovery_check.py` and `light_follow_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. See [validation notes](docs/VALIDATION.md) for current results and limits.
+Live tests write local JSON evidence, excluded from the repository. Scripts other than `wifi_setup_check.py`, `matrix_effects_check.py`, `matrix_check.py`, `wireless_update.py`, `control_check.py`, `recovery_check.py`, `blocked_recovery_check.py` and `light_follow_check.py` currently use this installation's default address/COM3; change their HOST/BASE/port for another setup. The native C++ tests use g++ or Visual Studio C++ Build Tools. For optional browser tests, install `playwright` with pip, run `playwright install chromium`, and run `test.ps1` first to generate the matrix fixtures. See [validation notes](docs/VALIDATION.md) for current results and limits.
 
 Clear the front by at least 80 cm before either lifted recovery test; their preflight check requires a reliable reading of at least 55 cm. The USB recovery diagnostic requires the exact command `TESTNOECHO LIFTED`. It intentionally suppresses filtered echoes until two turns complete, then restores real sonar readings; an independent 15-second deadline ends the test. Stop, reset and watchdog recovery clear the diagnostic. The separate `TESTBLOCKED LIFTED` diagnostic starts with real forward travel, simulates a 12 cm wall to exercise the retreat, restores real sonar, and stops at an independent 18-second deadline. Both diagnostics clear on Stop/reset. These are lifted-wheel tests, not floor-navigation certification.
 
@@ -265,6 +322,7 @@ build.ps1               Generate dashboard/credentials and compile
 prepare_wifi.py         Read local Wi-Fi settings without logging credentials
 prepare_dashboard.py    Embed the dashboard HTML in firmware
 car_tool.py             USB setup/status/Stop commands
+wireless_update.py      Password-protected Wi-Fi firmware updates
 light_follow_check.py    Timed real-light following test
 recovery_check.py        Lifted-car heading-recovery test
 blocked_recovery_check.py Lifted-car recent-path retreat test
@@ -275,7 +333,7 @@ wifi-config.example.json Example settings only
 
 ## 🤝 Development and contributions
 
-Found an issue or tried a different setup? [Open an issue](https://github.com/smartboy223/Freenove-4WD-Mecanum-rover/issues) with your board model, firmware version and steps to reproduce. Keep Wi-Fi passwords out of screenshots and reports. Changes to driving logic should include the PC controller checks and a lifted-wheel check before floor testing.
+Found an issue or tried a different setup? [Open an issue](https://github.com/smartboy223/Freenove-Pico-W-Mecanum-Rover/issues) with your board model, firmware version and steps to reproduce. Keep Wi-Fi passwords out of screenshots and reports. Changes to driving logic should include the PC controller checks and a lifted-wheel check before floor testing.
 
 `prepare_repo.py` is a local packaging helper for preparing a separate clean copy from a working hardware folder. It excludes credentials, compiled firmware, private backups, downloaded archives and hardware logs. It does not publish to GitHub or modify an existing repository checkout. Normal users can work directly in their clone.
 
@@ -295,12 +353,19 @@ Keep the original licenses with vendored code; see [third-party notices](THIRD-P
 | Roaming keeps turning and then stops | Missing echoes never authorize forward travel. Check the sensor/connector and try a flat target; recovery stops after eight unsuccessful turns. |
 | Repeated sonar alarms or unexpected stops | Check the connector, sensor alignment and a flat target. Isolated glitches pause quietly; persistent bad echoes prevent travel. |
 | Roaming is too close to turn and remains stopped | A close corner vetoes rotation. A short retreat needs recent forward travel; without it, reposition the car. There is no rear sensor. |
+| Matrix is fitted and forward driving is blocked on older firmware | Uncheck Front obstacle guard before arming manual controls, or update to 2.8 for automatic module-aware selection. The matrix cannot measure obstacles. |
+| Phone selects arrow text or holds movement after release | Update to 2.8 and reload the page; the captured touch controls stop on release, cancellation, neutral or leaving the pad. |
+| Matrix expressions look split or sideways | In Lights & sound, set Display alignment to 90° left, the kit default. Alignment corrects both panels without dropping pixels. |
+| Wireless update reports authentication failure | Preserve the original local ota-config.json. If it was lost or changed, rebuild and install once by USB. |
 | Light readings change but the car does not follow | Set the baseline with flashlight off, use Start timed flashlight follow, and check its action message/front clearance. A phone in the sonar beam can block movement. |
 | Line following is incorrect | Check line sensor height and black/white polarity in Sensors, then verify a centered strip while lifted. |
 | Dashboard looks old after an update | Refresh it or open a new browser tab. |
+| Home Wi-Fi is unavailable | Wait about 30 seconds, join Freenove-Rover without a password, then open http://192.168.4.1/. |
+| Phone leaves the car hotspot | Choose Stay connected when the phone reports No internet; check automatic network switching. |
 
 ## 🔗 References
 
 - [Freenove FNK0089 mecanum assembly guide](https://docs.freenove.com/projects/fnk0089/en/latest/fnk0089/codes/Mecanum/1_Assembling_Smart_Car.html)
 - [Official Freenove Pico kit resources](https://github.com/Freenove/Freenove_4WD_Car_Kit_for_Raspberry_Pi_Pico)
+- [Freenove matrix module tutorial](https://docs.freenove.com/projects/fnk0089/en/latest/fnk0089/codes/Mecanum/2_Module_test_.html)
 - [Arduino-Pico installation and USB recovery](https://arduino-pico.readthedocs.io/en/latest/install.html)

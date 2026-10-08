@@ -49,7 +49,7 @@ with serial.Serial(args.port or ports[0], 115200, timeout=2, write_timeout=2) as
     elif args.verify:
         results = []
         status = json.loads(send("STATUS"))
-        assert status["firmware"] in ("CarReady-1.0", "CarReady-1.1-LAN", "CarReady-1.2-Diagnostics", "CarReady-1.3-LAN-Fix", "CarReady-2.0", "CarReady-2.1", "CarReady-2.2", "CarReady-2.6")
+        assert status["firmware"] in ("CarReady-1.0", "CarReady-1.1-LAN", "CarReady-1.2-Diagnostics", "CarReady-1.3-LAN-Fix", "CarReady-2.0", "CarReady-2.1", "CarReady-2.2", "CarReady-2.6", "CarReady-2.7", "CarReady-2.8", "CarReady-2.9", "CarReady-2.10", "CarReady-2.11")
         assert not status["armed"] and not status["moving"]
         results.append({"check":"boot stopped", "status":status})
         assert send("DRIVE 10 10 10 10") == "ERR disarmed"

@@ -3,6 +3,8 @@ firmware/**/wifi_credentials.h
 build/
 backups/
 *.uf2
+*.bin
+*.elf
 __pycache__/
 firmware/**/Dashboard.h
 repo-export/
@@ -12,6 +14,7 @@ Freenove_4WD_Car_Kit-master/
 libraries/
 /*.json
 !wifi-config.example.json
+!hotspot-config.example.json
 /*.png
 Open-Car.url
 CONTROL-PLAN.md

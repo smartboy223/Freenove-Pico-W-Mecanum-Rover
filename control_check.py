@@ -51,7 +51,7 @@ try:
     code, page = request('/')
     assert code == 200
     token = re.search(r"const token='([a-f0-9]+)'", page)[1]
-    assert status()['firmware'] == 'CarReady-2.6'
+    assert status()['firmware'] == 'CarReady-2.11'
     record('new dashboard and stopped boot', status=stopped())
     assert request('/api/control?op=arm&guard=1', True, False)[0] == 403
     record('unauthorized control rejected')

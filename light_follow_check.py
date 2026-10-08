@@ -30,7 +30,7 @@ try:
     request('/api/stop',True)
     token=re.search(r"const token='([a-f0-9]+)'",request('/'))[1]
     initial=status();report['initial']=initial
-    assert initial['firmware']=='CarReady-2.6'
+    assert initial['firmware']=='CarReady-2.11'
     assert initial['light_calibrated'],'Set the ambient baseline with the flashlight OFF first.'
     assert initial['front_cm'] is not None and initial['front_cm']>=35,'Clear the front and keep hands out of the sonar beam.'
     request(f'/api/control?op=mode&name=light&speed=25&threshold=3&seconds={args.seconds}&autonomous=1',True)

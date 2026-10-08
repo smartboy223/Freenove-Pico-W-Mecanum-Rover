@@ -1,4 +1,4 @@
-# Physical remote — CarReady-2.6
+# Physical remote — CarReady-2.10
 
 The remote is enabled. Aim it at the car's IR receiver. Line following uses the dashboard's polarity setting; this car is calibrated to black reads 0.
 
@@ -17,7 +17,7 @@ The remote is enabled. Aim it at the car's IR receiver. Line following uses the 
 | 6 | Obstacle autopilot |
 | Power / MENU / return / 2 / 5 | Unassigned |
 
-Manual movement expires after 350 ms without repeat frames. Automatic remote modes expire after 3 seconds without renewal; holding the matching button can renew them. Forward movement needs reliable front ultrasonic echoes at least 35 cm away. Sideways and diagonal movement are available on the dashboard. The owner-confirmed forward/backward reversal is corrected in this version; turning stays unchanged. The dashboard can start longer, independently timed roaming. A remote 6 press starts a scan; hold it to renew the short remote lease long enough to complete the scan. Calibrate the ambient light baseline on the dashboard before remote C light following.
+Manual movement expires after 350 ms without repeat frames. Automatic remote modes expire after 3 seconds without renewal; holding the matching button can renew them. With the ultrasonic module fitted, forward movement needs reliable front echoes at least 35 cm away. With the LED matrix fitted, manual remote driving works without obstacle sensing; automatic modes still require the ultrasonic module. Sideways and diagonal movement are available on the dashboard. The owner-confirmed forward/backward reversal is corrected in this version; turning stays unchanged. The dashboard can start longer, independently timed roaming. A remote 6 press starts a scan; hold it to renew the short remote lease long enough to complete the scan. Calibrate the ambient light baseline on the dashboard before remote C light following.
 
 While the dashboard owns an armed car, the remote can stop it with ▶ or 9; other remote commands wait until it is disarmed. The dashboard cannot take over an active remote session without Stop first. TEST and + raw codes were physically verified; full button operation and floor behavior still need individual checks.
 

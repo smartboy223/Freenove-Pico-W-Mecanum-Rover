@@ -22,7 +22,7 @@ def command(query):
 def status():
     code,body=request('/api/status');assert code==200
     s=json.loads(body);assert not s['armed'] and not s['moving'] and s['wheels']==[0]*4
-    assert s['firmware']=='CarReady-2.6'
+    assert s['firmware']=='CarReady-2.11'
     return s
 def record(name,**values):
     results.append({'check':name,'passed':True,**values});print('PASS:',name,flush=True)
@@ -54,8 +54,10 @@ try:
         command('op=servo&angle='+str(angle))
         assert status()['head_angle']==angle
     record('wide servo endpoints accepted with wheels stopped')
-    assert request('/api/control?op=mode&name=pilot&speed=20&seconds=10&escape=2',True)[0]==400
-    status();record('invalid escape option rejected before arming')
+    fitted=status()['module']
+    expected=409 if fitted=='matrix' else 400
+    assert request('/api/control?op=mode&name=pilot&speed=20&seconds=10&escape=2',True)[0]==expected
+    status();record('matrix automatic-mode gate rejects before arming' if fitted=='matrix' else 'invalid escape option rejected before arming')
 finally:
     request('/api/stop',True)
     Path('studio-check.json').write_text(json.dumps({'results':results,'final':status()},indent=2))
